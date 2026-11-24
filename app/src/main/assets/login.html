@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EduBond Intro</title>
+    <style>
+        :root { --bg-color: #0f172a; }
+        body, html {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            background-color: var(--bg-color);
+            display: flex; justify-content: center; align-items: center;
+            overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        #intro-screen {
+            display: flex; flex-direction: column; align-items: center;
+            transition: opacity 0.6s ease-out;
+        }
+        #intro-text {
+            color: #64748b; font-size: 1.2rem; margin-top: 30px;
+            transition: all 0.4s;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+        #lamp-svg { width: 320px; height: 400px; }
+
+        .lamp-shade { fill: #1e293b; transition: fill 0.4s; }
+        .lamp-shade-bottom { fill: #0f172a; transition: fill 0.4s; }
+        .lamp-base { fill: #334155; transition: fill 0.4s; }
+        .lamp-stem { fill: #334155; transition: fill 0.4s; }
+        .lamp-base-top { fill: #475569; transition: fill 0.4s; }
+
+        .light-beam { fill: url(#lightGradient); opacity: 0; transition: opacity 0.5s; pointer-events: none; }
+
+        .eye-closed { stroke: #000; stroke-width: 2.5; fill: none; stroke-linecap: round; opacity: 0.6; }
+        .eye-happy, .mouth-happy, .tongue { display: none; fill: #000; opacity: 0.9; }
+        .tongue { fill: #ff7b7b; }
+
+        .string-line { stroke: #94a3b8; stroke-width: 2; fill: none; transition: stroke 0.4s; }
+        .string-knob { fill: #cbd5e1; cursor: pointer; filter: drop-shadow(0 0 2px rgba(0,0,0,0.5)); transition: fill 0.4s; }
+
+        /* LIGHT ON STATES */
+        .light-on .lamp-shade { fill: #a3ad8a; }
+        .light-on .lamp-shade-bottom { fill: #fffef0; }
+        .light-on .lamp-base { fill: #e2e8f0; }
+        .light-on .lamp-base-top { fill: #f8fafc; }
+        .light-on .lamp-stem { fill: #f8fafc; }
+        .light-on .light-beam { opacity: 0.6; }
+        .light-on .eye-closed { display: none; }
+        .light-on .eye-happy, .light-on .mouth-happy, .light-on .tongue { display: block; }
+        .light-on .string-line { stroke: #f8fafc; }
+        .light-on .string-knob { fill: #f8fafc; }
+        .light-on #intro-text { color: #facc15; transform: scale(1.1); font-weight: bold; text-shadow: 0 0 10px rgba(250, 204, 21, 0.5); }
+    </style>
+</head>
+<body>
+    <div id="intro-screen">
+        <svg id="lamp-svg" viewBox="0 0 200 320" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+                <linearGradient id="lightGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                    <stop offset="0%" style="stop-color:#fffef0; stop-opacity:1" />
+                    <stop offset="100%" style="stop-color:#fffef0; stop-opacity:0" />
+                </linearGradient>
+                <radialGradient id="baseShadow" cx="50%" cy="50%" r="50%">
+                    <stop offset="0%" style="stop-color:#000; stop-opacity:0.3" />
+                    <stop offset="100%" style="stop-color:#000; stop-opacity:0" />
+                </radialGradient>
+            </defs>
+
+            <!-- Light Beam -->
+            <path class="light-beam" d="M55 150 L145 150 L200 320 L0 320 Z" />
+
+            <!-- Base Shadow -->
+            <ellipse cx="100" cy="295" rx="50" ry="10" fill="url(#baseShadow)" />
+
+            <!-- Lamp Base -->
+            <ellipse class="lamp-base" cx="100" cy="290" rx="45" ry="12" />
+            <ellipse class="lamp-base-top" cx="100" cy="285" rx="45" ry="12" />
+
+            <!-- Lamp Stem -->
+            <rect class="lamp-stem" x="94" y="150" width="12" height="135" rx="2" />
+
+            <!-- Pull String -->
+            <g id="pull-string">
+                <!-- Wavy string path -->
+                <path id="s-line" class="string-line" d="M82 150 Q85 180 82 210" />
+                <path id="s-knob" class="string-knob" d="M78 210 L86 210 L82 222 Z" />
+            </g>
+
+            <!-- Lamp Shade -->
+            <g id="shade-group">
+                <path class="lamp-shade" d="M70 40 L130 40 L145 150 L55 150 Z" />
+                <!-- Bright bottom glow -->
+                <path class="lamp-shade-bottom" d="M55 150 Q100 165 145 150 Q100 142 55 150 Z" />
+                <path d="M70 40 Q100 32 130 40 Q100 48 70 40 Z" fill="#2d3748" opacity="0.2" />
+            </g>
+
+            <!-- Face on Shade -->
+            <g id="face">
+                <!-- Off State eyes -->
+                <path class="eye-closed" d="M80 90 Q85 96 90 90" />
+                <path class="eye-closed" d="M110 90 Q115 96 120 90" />
+
+                <!-- On State Face -->
+                <path class="eye-happy" d="M80 92 Q85 86 90 92" />
+                <path class="eye-happy" d="M110 92 Q115 86 120 92" />
+                <!-- Open mouth -->
+                <path class="mouth-happy" d="M92 105 Q100 125 108 105 Z" />
+                <!-- Tongue -->
+                <path class="tongue" d="M100 115 Q104 122 108 115 Q104 112 100 115 Z" />
+            </g>
+        </svg>
+        <div id="intro-text">Pull down to light up</div>
+    </div>
+
+    <script>
+        const knob = document.getElementById('s-knob');
+        const line = document.getElementById('s-line');
+        const screen = document.getElementById('intro-screen');
+        const text = document.getElementById('intro-text');
+        const pullGroup = document.getElementById('pull-string');
+        let active = false;
+
+        function pull() {
+            if (active) return;
+            active = true;
+
+            // Animation for pulling down
+            line.setAttribute('d', 'M82 150 Q85 195 82 240');
+            knob.setAttribute('transform', 'translate(0, 30)');
+
+            setTimeout(() => {
+                screen.classList.add('light-on');
+                text.innerText = "Welcome to EduBond";
+
+                // Return string to original position
+                line.setAttribute('d', 'M82 150 Q85 180 82 210');
+                knob.setAttribute('transform', 'translate(0, 0)');
+
+                setTimeout(() => {
+                    if (window.Android) window.Android.onIntroDone();
+                }, 1500);
+            }, 250);
+        }
+
+        pullGroup.addEventListener('mousedown', pull);
+        pullGroup.addEventListener('touchstart', pull);
+    </script>
+</body>
+</html>
