@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "850714985586",
+    "project_id": "peermatrix-6a1db",
+    "storage_bucket": "peermatrix-6a1db.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:850714985586:android:da335e30902e1436bfaeeb",
+        "android_client_info": {
+          "package_name": "com.example.peermatrix"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "850714985586-79ui4p57n2cbn81limhun4hli4mu9rmd.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.peermatrix",
+            "certificate_hash": "8d7f4b6f484c83d28659825451325bd4427bff19"
+          }
+        },
+        {
+          "client_id": "850714985586-f332vkjs0415ef9r6reoe7suade92jbn.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAKFTaCHzO10Z7SUZSEBxjPkEOJkNwkZ28"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "850714985586-f332vkjs0415ef9r6reoe7suade92jbn.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
