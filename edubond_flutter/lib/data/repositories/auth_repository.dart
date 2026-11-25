@@ -1,6 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import '../../core/constants/app_constants.dart';
 import '../../core/constants/firestore_collections.dart';
 import '../../models/user_model.dart';
 import '../datasources/firebase_auth_datasource.dart';
@@ -40,9 +39,15 @@ class AuthRepository {
   final FirebaseAuthDataSource _auth;
   final FirestoreDataSource _firestore;
   final LocalPrefsDataSource _local;
+  bool _isAdminAuthorized = false;
 
+  bool get isAdminAuthorized => _isAdminAuthorized;
   User? get currentFirebaseUser => _auth.currentUser;
   String get currentLocalEmail => _local.getCurrentUser();
+  String get activeUserEmail {
+    final local = _local.getCurrentUser();
+    return local.isNotEmpty ? local : (_auth.currentUser?.email ?? '');
+  }
 
   /// Mirrors MainActivity's dual session guard (FirebaseAuth + SharedPreferences).
   Future<bool> hasValidSession() async {
@@ -58,8 +63,7 @@ class AuthRepository {
   }
 
   Future<UserModel?> fetchUserProfile(String uid) async {
-    final doc = await _firestore.getDoc(FirestoreCollections.users, uid);
-    final data = doc.data();
+    final data = await _firestore.getDocData(FirestoreCollections.users, uid);
     if (data == null) return null;
     return UserModel.fromMap(data, fallbackUid: uid);
   }
@@ -119,9 +123,9 @@ class AuthRepository {
     final photoUrl = user.photoURL ?? '';
 
     try {
-      final doc = await _firestore.getDoc(FirestoreCollections.users, uid);
+      final data = await _firestore.getDocData(FirestoreCollections.users, uid);
       final passwordSet =
-          (doc.data()?[FirestoreFields.passwordSet] as bool?) ?? false;
+          (data?[FirestoreFields.passwordSet] as bool?) ?? false;
       return GoogleSignInOutcome(
         nextStep: passwordSet
             ? GoogleAuthNextStep.verifyAppPassword
@@ -258,28 +262,40 @@ class AuthRepository {
     required String adminId,
     required String password,
   }) async {
-    final doc = await _firestore.getDoc(
+    final data = await _firestore.getDocData(
       FirestoreCollections.adminConfig,
       FirestoreCollections.adminCredentialsDoc,
     );
 
-    final bool matched;
-    if (doc.exists) {
-      final dbId = doc.data()?[FirestoreFields.id] as String?;
-      final dbPass = doc.data()?[FirestoreFields.password] as String?;
-      matched = adminId.trim() == dbId && password.trim() == dbPass;
-    } else {
-      matched = adminId.trim() == AppConstants.fallbackAdminId &&
-          password.trim() == AppConstants.fallbackAdminPass;
+    if (data == null) {
+      _isAdminAuthorized = false;
+      return false;
     }
+
+    final dbId = (data[FirestoreFields.id] as String?)?.trim();
+    final dbPass = (data[FirestoreFields.password] as String?)?.trim();
+    final matched = dbId != null &&
+        dbId.isNotEmpty &&
+        dbPass != null &&
+        dbPass.isNotEmpty &&
+        adminId.trim() == dbId &&
+        password.trim() == dbPass;
 
     if (matched) {
       await logout();
+      _isAdminAuthorized = true;
+    } else {
+      _isAdminAuthorized = false;
     }
     return matched;
   }
 
+  void logoutAdmin() {
+    _isAdminAuthorized = false;
+  }
+
   Future<void> logout() async {
+    _isAdminAuthorized = false;
     await _auth.signOut();
     await _local.logout();
   }

@@ -12,11 +12,15 @@ class QuizSubmissionOutcome {
     required this.score,
     required this.passed,
     required this.blocked,
+    this.attempts = 0,
+    this.totalAttempts = 0,
   });
 
   final int score;
   final bool passed;
   final bool blocked;
+  final int attempts;
+  final int totalAttempts;
 }
 
 class QuizRepository {
@@ -29,11 +33,38 @@ class QuizRepository {
   final FirestoreDataSource _firestore;
   final LocalPrefsDataSource _local;
 
+  /// Scores answers using exact Kotlin match (`selected == question.answer`).
+  static int calculateScore(
+    List<QuizQuestionModel> questions,
+    List<String?> selectedAnswers,
+  ) {
+    var score = 0;
+    for (var i = 0; i < questions.length; i++) {
+      final selected = i < selectedAnswers.length ? selectedAnswers[i] : null;
+      if (selected != null && selected == questions[i].answer) {
+        score++;
+      }
+    }
+    return score;
+  }
+
+  /// Preserves Kotlin set rotation formula: `totalAttempts % sets.size`.
+  static int selectSetIndex({
+    required int totalAttempts,
+    required int setCount,
+  }) {
+    if (setCount <= 0) return 0;
+    return totalAttempts % setCount;
+  }
+
   /// Mirrors `FirebaseHistoryManager.seedDefaultQuizzesToCloud()`.
   Future<void> seedDefaultQuizzesToCloud() async {
     for (final subject in AppConstants.seededQuizSubjects) {
-      final quizDoc = await _firestore.getDoc(FirestoreCollections.quizzes, subject);
-      if (!quizDoc.exists) {
+      final quizData = await _firestore.getDocData(
+        FirestoreCollections.quizzes,
+        subject,
+      );
+      if (quizData == null) {
         final defaultSets = QuizSeedData.getDefaultSetsForSubject(subject);
         if (defaultSets != null) {
           await saveQuizSetsToCloud(
@@ -44,8 +75,11 @@ class QuizRepository {
       }
 
       final subId = DocIdHelper.subjectDocId(subject);
-      final subDoc = await _firestore.getDoc(FirestoreCollections.subjects, subId);
-      if (!subDoc.exists) {
+      final subData = await _firestore.getDocData(
+        FirestoreCollections.subjects,
+        subId,
+      );
+      if (subData == null) {
         await _firestore.setDoc(
           FirestoreCollections.subjects,
           subId,
@@ -58,14 +92,20 @@ class QuizRepository {
     }
   }
 
+  /// Loads quiz sets from Firestore (`quizzes/{subject}.quizJson`), synchronizes
+  /// the local cache on cloud hit, and falls back to SharedPreferences / seed data.
   Future<List<List<QuizQuestionModel>>> getQuizSets(String subject) async {
     var localSets = await _local.getQuizSets(subject);
     try {
-      final doc = await _firestore.getDoc(FirestoreCollections.quizzes, subject);
-      final rawJson = doc.data()?[FirestoreFields.quizJson] as String?;
+      final data = await _firestore.getDocData(
+        FirestoreCollections.quizzes,
+        subject,
+      );
+      final rawJson = data?[FirestoreFields.quizJson] as String?;
       if (rawJson != null && rawJson.isNotEmpty) {
         final cloudSets = QuizQuestionModel.decodeQuizSets(rawJson);
         if (cloudSets.isNotEmpty) {
+          await _local.saveQuizSets(subject, cloudSets);
           localSets = cloudSets;
         }
       }
@@ -97,8 +137,10 @@ class QuizRepository {
     required String subject,
   }) async {
     final docId = DocIdHelper.emailSubjectDocId(email, subject);
-    final doc = await _firestore.getDoc(FirestoreCollections.quizAttempts, docId);
-    final data = doc.data();
+    final data = await _firestore.getDocData(
+      FirestoreCollections.quizAttempts,
+      docId,
+    );
     if (data == null) return null;
     return QuizAttemptModel.fromMap(data);
   }
@@ -110,18 +152,13 @@ class QuizRepository {
     required List<QuizQuestionModel> questions,
     required List<String?> selectedAnswers,
   }) async {
-    var score = 0;
-    for (var i = 0; i < questions.length; i++) {
-      final selected = i < selectedAnswers.length ? selectedAnswers[i] : null;
-      if (selected != null && selected == questions[i].answer) {
-        score++;
-      }
-    }
-
+    final score = calculateScore(questions, selectedAnswers);
     final passed = score >= AppConstants.quizPassingScore;
     final attemptId = DocIdHelper.emailSubjectDocId(email, subject);
-    final doc = await _firestore.getDoc(FirestoreCollections.quizAttempts, attemptId);
-    final data = doc.data();
+    final data = await _firestore.getDocData(
+      FirestoreCollections.quizAttempts,
+      attemptId,
+    );
 
     var attempts = ((data?[FirestoreFields.attempts] as num?)?.toInt() ?? 0) + 1;
     final totalAttempts =
@@ -171,6 +208,8 @@ class QuizRepository {
       score: score,
       passed: passed,
       blocked: blocked,
+      attempts: attempts,
+      totalAttempts: totalAttempts,
     );
   }
 }

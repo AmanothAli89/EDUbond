@@ -9,6 +9,7 @@ import '../../core/widgets/edu_header_and_tiles.dart';
 import '../../core/widgets/edu_text_field.dart';
 import '../../models/subject_request_model.dart';
 import '../../shared/widgets/empty_state_view.dart';
+import 'admin_access_guard.dart';
 
 class AdminSubjectsScreen extends ConsumerStatefulWidget {
   const AdminSubjectsScreen({super.key});
@@ -67,31 +68,15 @@ class _AdminSubjectsScreenState extends ConsumerState<AdminSubjectsScreen> {
   }
 
   Future<void> _showAddSubjectDialog() async {
-    final ctrl = TextEditingController();
-    final ok = await showDialog<bool>(
+    final name = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Add New Subject'),
-        content: TextField(
-          controller: ctrl,
-          decoration: const InputDecoration(hintText: 'Enter subject name'),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Add'),
-          ),
-        ],
+      builder: (_) => const _SubjectTextInputDialog(
+        title: 'Add New Subject',
+        hintText: 'Enter subject name',
+        confirmLabel: 'Add',
       ),
     );
-
-    final name = ctrl.text.trim();
-    ctrl.dispose();
-    if (ok == true && name.isNotEmpty) {
+    if (name != null && name.isNotEmpty) {
       try {
         await ref.read(subjectRepositoryProvider).addSubjectGlobally(name);
         if (!mounted) return;
@@ -166,27 +151,15 @@ class _AdminSubjectsScreenState extends ConsumerState<AdminSubjectsScreen> {
   }
 
   Future<void> _showEditRequestDialog(SubjectRequestModel req) async {
-    final ctrl = TextEditingController(text: req.subject);
-    final ok = await showDialog<bool>(
+    final updated = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Edit & Accept Request'),
-        content: TextField(controller: ctrl),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Save & Accept'),
-          ),
-        ],
+      builder: (_) => _SubjectTextInputDialog(
+        title: 'Edit & Accept Request',
+        initialValue: req.subject,
+        confirmLabel: 'Save & Accept',
       ),
     );
-    final updated = ctrl.text.trim();
-    ctrl.dispose();
-    if (ok == true && updated.isNotEmpty) {
+    if (updated != null && updated.isNotEmpty) {
       await _acceptRequest(req, renamed: updated);
     }
   }
@@ -205,8 +178,9 @@ class _AdminSubjectsScreenState extends ConsumerState<AdminSubjectsScreen> {
         )
         .toList();
 
-    return Scaffold(
-      body: SafeArea(
+    return AdminAccessGuard(
+      child: Scaffold(
+        body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(20, 22, 20, 16),
           child: Column(
@@ -252,6 +226,7 @@ class _AdminSubjectsScreenState extends ConsumerState<AdminSubjectsScreen> {
           ),
         ),
       ),
+    ),
     );
   }
 
@@ -425,6 +400,63 @@ class _AdminSubjectsScreenState extends ConsumerState<AdminSubjectsScreen> {
         label,
         style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
       ),
+    );
+  }
+}
+
+class _SubjectTextInputDialog extends StatefulWidget {
+  const _SubjectTextInputDialog({
+    required this.title,
+    required this.confirmLabel,
+    this.hintText,
+    this.initialValue = '',
+  });
+
+  final String title;
+  final String confirmLabel;
+  final String? hintText;
+  final String initialValue;
+
+  @override
+  State<_SubjectTextInputDialog> createState() =>
+      _SubjectTextInputDialogState();
+}
+
+class _SubjectTextInputDialogState extends State<_SubjectTextInputDialog> {
+  late final TextEditingController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: widget.initialValue);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.title),
+      content: TextField(
+        controller: _ctrl,
+        decoration: widget.hintText != null
+            ? InputDecoration(hintText: widget.hintText)
+            : const InputDecoration(),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(_ctrl.text.trim()),
+          child: Text(widget.confirmLabel),
+        ),
+      ],
     );
   }
 }

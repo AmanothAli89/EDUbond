@@ -11,10 +11,9 @@ class GroupRepository {
   final FirestoreDataSource _firestore;
 
   Future<GroupModel?> getGroupInfo(String groupId) async {
-    final doc = await _firestore.getDoc(FirestoreCollections.groups, groupId);
-    final data = doc.data();
+    final data = await _firestore.getDocData(FirestoreCollections.groups, groupId);
     if (data == null) return null;
-    return GroupModel.fromMap(data, fallbackId: doc.id);
+    return GroupModel.fromMap(data, fallbackId: groupId);
   }
 
   Future<void> createGroup({
@@ -37,39 +36,58 @@ class GroupRepository {
   }
 
   Future<List<GroupModel>> getGroupsBySubject(String subject) async {
-    final snap = await _firestore.raw
-        .collection(FirestoreCollections.groups)
-        .where(FirestoreFields.subject, isEqualTo: subject)
-        .get();
-    return snap.docs
-        .map((doc) => GroupModel.fromMap(doc.data(), fallbackId: doc.id))
+    final records = await _firestore.queryRecords(
+      FirestoreCollections.groups,
+      isEqualTo: {FirestoreFields.subject: subject},
+    );
+    return records
+        .map((r) => GroupModel.fromMap(r.data, fallbackId: r.id))
         .toList();
   }
 
+  /// Returns all groups where `email` appears in `members`, `teachers`, or `createdBy`.
   Future<List<GroupModel>> getGroupsForUser(String email) async {
-    final memberSnap = await _firestore.raw
-        .collection(FirestoreCollections.groups)
-        .where(FirestoreFields.members, arrayContains: email)
-        .get();
-    final teacherSnap = await _firestore.raw
-        .collection(FirestoreCollections.groups)
-        .where(FirestoreFields.teachers, arrayContains: email)
-        .get();
+    final memberRecords = await _firestore.queryRecords(
+      FirestoreCollections.groups,
+      arrayContains: {FirestoreFields.members: email},
+    );
+    final teacherRecords = await _firestore.queryRecords(
+      FirestoreCollections.groups,
+      arrayContains: {FirestoreFields.teachers: email},
+    );
+    final creatorRecords = await _firestore.queryRecords(
+      FirestoreCollections.groups,
+      isEqualTo: {FirestoreFields.createdBy: email},
+    );
 
     final byId = <String, GroupModel>{};
-    for (final doc in [...memberSnap.docs, ...teacherSnap.docs]) {
-      final group = GroupModel.fromMap(doc.data(), fallbackId: doc.id);
+    for (final r in [...memberRecords, ...teacherRecords, ...creatorRecords]) {
+      final group = GroupModel.fromMap(r.data, fallbackId: r.id);
       byId[group.id] = group;
     }
     return byId.values.toList();
   }
 
-  Future<void> requestToJoinGroup({
+  /// Sends a join request unless a `pending` request already exists for this
+  /// user and group. Returns `true` if created, `false` if duplicate pending.
+  Future<bool> requestToJoinGroup({
     required String groupId,
     required String groupName,
     required String subject,
     required String requesterEmail,
-  }) {
+  }) async {
+    final existing = await _firestore.queryRecords(
+      FirestoreCollections.groupJoinRequests,
+      isEqualTo: {
+        FirestoreFields.groupId: groupId,
+        FirestoreFields.requester: requesterEmail,
+        FirestoreFields.status: 'pending',
+      },
+    );
+    if (existing.isNotEmpty) {
+      return false;
+    }
+
     final now = DateTime.now().millisecondsSinceEpoch;
     final req = GroupRequestModel(
       id: DocIdHelper.newTimestampId(now),
@@ -80,11 +98,12 @@ class GroupRepository {
       status: 'pending',
       timestamp: now,
     );
-    return _firestore.setDoc(
+    await _firestore.setDoc(
       FirestoreCollections.groupJoinRequests,
       req.id,
       req.toMap(),
     );
+    return true;
   }
 
   Future<List<GroupRequestModel>> getIncomingJoinRequests(String email) async {
@@ -99,14 +118,15 @@ class GroupRepository {
         i,
         i + 10 > groupIds.length ? groupIds.length : i + 10,
       );
-      final snap = await _firestore.raw
-          .collection(FirestoreCollections.groupJoinRequests)
-          .where(FirestoreFields.groupId, whereIn: chunk)
-          .where(FirestoreFields.status, isEqualTo: 'pending')
-          .get();
-      for (final doc in snap.docs) {
-        final req = GroupRequestModel.fromMap(doc.data());
-        if (req.requester != email) {
+      final records = await _firestore.queryRecords(
+        FirestoreCollections.groupJoinRequests,
+        whereInField: FirestoreFields.groupId,
+        whereInValues: chunk,
+        isEqualTo: {FirestoreFields.status: 'pending'},
+      );
+      for (final r in records) {
+        final req = GroupRequestModel.fromMap(r.data);
+        if (req.requester.toLowerCase() != email.toLowerCase()) {
           results.add(req);
         }
       }
@@ -115,11 +135,13 @@ class GroupRepository {
   }
 
   Future<List<GroupRequestModel>> getSentRequests(String email) async {
-    final snap = await _firestore.raw
-        .collection(FirestoreCollections.groupJoinRequests)
-        .where(FirestoreFields.requester, isEqualTo: email)
-        .get();
-    return snap.docs.map((doc) => GroupRequestModel.fromMap(doc.data())).toList();
+    final records = await _firestore.queryRecords(
+      FirestoreCollections.groupJoinRequests,
+      isEqualTo: {FirestoreFields.requester: email},
+    );
+    final list = records.map((r) => GroupRequestModel.fromMap(r.data)).toList();
+    list.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+    return list;
   }
 
   Future<void> acceptJoinRequest({
@@ -147,13 +169,27 @@ class GroupRepository {
     );
   }
 
-  Future<void> requestTeacherToJoin({
+  /// Sends a teacher invitation unless a `pending` invitation already exists
+  /// for the same group and teacher. Returns `true` if created, `false` if duplicate.
+  Future<bool> requestTeacherToJoin({
     required String groupId,
     required String groupName,
     required String subject,
     required String requesterEmail,
     required String teacherEmail,
-  }) {
+  }) async {
+    final existing = await _firestore.queryRecords(
+      FirestoreCollections.teacherGroupRequests,
+      isEqualTo: {
+        FirestoreFields.groupId: groupId,
+        FirestoreFields.teacher: teacherEmail,
+        FirestoreFields.status: 'pending',
+      },
+    );
+    if (existing.isNotEmpty) {
+      return false;
+    }
+
     final now = DateTime.now().millisecondsSinceEpoch;
     final req = GroupRequestModel(
       id: DocIdHelper.newTimestampId(now),
@@ -165,22 +201,39 @@ class GroupRepository {
       status: 'pending',
       timestamp: now,
     );
-    return _firestore.setDoc(
+    await _firestore.setDoc(
       FirestoreCollections.teacherGroupRequests,
       req.id,
       req.toMap(),
     );
+    return true;
+  }
+
+  Future<Set<String>> getPendingInvitedTeachersForGroup(String groupId) async {
+    final records = await _firestore.queryRecords(
+      FirestoreCollections.teacherGroupRequests,
+      isEqualTo: {
+        FirestoreFields.groupId: groupId,
+        FirestoreFields.status: 'pending',
+      },
+    );
+    return records
+        .map((r) => (r.data[FirestoreFields.teacher] as String?) ?? '')
+        .where((t) => t.isNotEmpty)
+        .toSet();
   }
 
   Future<List<GroupRequestModel>> getIncomingTeacherRequests(
     String email,
   ) async {
-    final snap = await _firestore.raw
-        .collection(FirestoreCollections.teacherGroupRequests)
-        .where(FirestoreFields.teacher, isEqualTo: email)
-        .where(FirestoreFields.status, isEqualTo: 'pending')
-        .get();
-    return snap.docs.map((doc) => GroupRequestModel.fromMap(doc.data())).toList();
+    final records = await _firestore.queryRecords(
+      FirestoreCollections.teacherGroupRequests,
+      isEqualTo: {
+        FirestoreFields.teacher: email,
+        FirestoreFields.status: 'pending',
+      },
+    );
+    return records.map((r) => GroupRequestModel.fromMap(r.data)).toList();
   }
 
   Future<void> acceptTeacherRequest({
@@ -212,18 +265,18 @@ class GroupRepository {
     required String groupId,
     required String email,
   }) async {
-    final doc = await _firestore.getDoc(FirestoreCollections.groups, groupId);
-    if (!doc.exists) {
+    final data = await _firestore.getDocData(FirestoreCollections.groups, groupId);
+    if (data == null) {
       throw Exception('Group not found.');
     }
-    final data = doc.data() ?? const <String, dynamic>{};
+    final lower = email.toLowerCase();
     final members = (data[FirestoreFields.members] as List<dynamic>? ?? [])
         .map((e) => e.toString())
-        .where((e) => e != email)
+        .where((e) => e.toLowerCase() != lower)
         .toList();
     final teachers = (data[FirestoreFields.teachers] as List<dynamic>? ?? [])
         .map((e) => e.toString())
-        .where((e) => e != email)
+        .where((e) => e.toLowerCase() != lower)
         .toList();
 
     await _firestore.updateDoc(

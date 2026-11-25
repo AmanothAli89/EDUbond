@@ -1,4 +1,6 @@
+import 'dart:typed_data';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -93,5 +95,35 @@ final chatRepositoryProvider = Provider<ChatRepository>((ref) {
 });
 
 final adminRepositoryProvider = Provider<AdminRepository>((ref) {
-  return AdminRepository(ref.watch(firestoreDataSourceProvider));
+  return AdminRepository(
+    ref.watch(firestoreDataSourceProvider),
+    isAdminAuthorized: () => ref.read(authRepositoryProvider).isAdminAuthorized,
+  );
+});
+
+class PickedAttachment {
+  const PickedAttachment({
+    required this.name,
+    required this.bytes,
+    this.extension,
+  });
+
+  final String name;
+  final Uint8List bytes;
+  final String? extension;
+}
+
+typedef FilePickHandler = Future<PickedAttachment?> Function();
+
+final filePickProvider = Provider<FilePickHandler>((ref) {
+  return () async {
+    final file = await FilePicker.pickFile();
+    if (file == null) return null;
+    final bytes = await file.readAsBytes();
+    return PickedAttachment(
+      name: file.name,
+      bytes: bytes,
+      extension: file.extension,
+    );
+  };
 });

@@ -7,6 +7,7 @@ import '../../core/widgets/edu_button.dart';
 import '../../core/widgets/edu_card.dart';
 import '../../core/widgets/edu_header_and_tiles.dart';
 import '../../models/quiz_question_model.dart';
+import 'admin_access_guard.dart';
 
 class AdminQuizEditorScreen extends ConsumerStatefulWidget {
   const AdminQuizEditorScreen({super.key, required this.subject});
@@ -79,10 +80,17 @@ class _AdminQuizEditorScreenState extends ConsumerState<AdminQuizEditorScreen> {
 
   Future<void> _saveCurrentSet() async {
     final parsed = <QuizQuestionModel>[];
-    for (final c in _controllers) {
-      final q = c.toModelOrNull();
+    for (var i = 0; i < _controllers.length; i++) {
+      final q = _controllers[i].toModelOrNull();
       if (q == null) {
         showEduSnackBar(context, 'Please fill all fields for 10 questions');
+        return;
+      }
+      if (!q.options.contains(q.answer)) {
+        showEduSnackBar(
+          context,
+          'Question ${i + 1} answer must match one of the 4 options',
+        );
         return;
       }
       parsed.add(q);
@@ -115,8 +123,9 @@ class _AdminQuizEditorScreenState extends ConsumerState<AdminQuizEditorScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: SafeArea(
+    return AdminAccessGuard(
+      child: Scaffold(
+        body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(20, 22, 20, 20),
           child: Column(
@@ -225,6 +234,28 @@ class _AdminQuizEditorScreenState extends ConsumerState<AdminQuizEditorScreen> {
                                     c.ans,
                                     'Correct Answer (must match one option)',
                                   ),
+                                  const SizedBox(height: 8),
+                                  Wrap(
+                                    spacing: 6,
+                                    runSpacing: 6,
+                                    children: [
+                                      for (final entry in [
+                                        ('Opt 1', c.o1),
+                                        ('Opt 2', c.o2),
+                                        ('Opt 3', c.o3),
+                                        ('Opt 4', c.o4),
+                                      ])
+                                        ActionChip(
+                                          label: Text(entry.$1),
+                                          onPressed: () {
+                                            final val = entry.$2.text.trim();
+                                            if (val.isNotEmpty) {
+                                              setState(() => c.ans.text = val);
+                                            }
+                                          },
+                                        ),
+                                    ],
+                                  ),
                                 ],
                               ),
                             ),
@@ -236,6 +267,7 @@ class _AdminQuizEditorScreenState extends ConsumerState<AdminQuizEditorScreen> {
           ),
         ),
       ),
+    ),
     );
   }
 

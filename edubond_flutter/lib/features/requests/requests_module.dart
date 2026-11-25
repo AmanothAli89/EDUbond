@@ -32,7 +32,7 @@ class _RequestsModulePageState extends ConsumerState<RequestsModulePage> {
       _loading = true;
       _error = null;
     });
-    final email = ref.read(authRepositoryProvider).currentLocalEmail;
+    final email = ref.read(authRepositoryProvider).activeUserEmail;
     final repo = ref.read(groupRepositoryProvider);
 
     try {
@@ -84,7 +84,7 @@ class _RequestsModulePageState extends ConsumerState<RequestsModulePage> {
   }
 
   Future<void> _acceptTeaching(GroupRequestModel req) async {
-    final email = ref.read(authRepositoryProvider).currentLocalEmail;
+    final email = ref.read(authRepositoryProvider).activeUserEmail;
     try {
       await ref.read(groupRepositoryProvider).acceptTeacherRequest(
             requestId: req.id,

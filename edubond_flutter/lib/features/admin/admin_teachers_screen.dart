@@ -8,6 +8,7 @@ import '../../core/widgets/edu_text_field.dart';
 import '../../models/quiz_attempt_model.dart';
 import '../../models/user_role_model.dart';
 import '../../shared/widgets/empty_state_view.dart';
+import 'admin_access_guard.dart';
 
 class AdminTeachersScreen extends ConsumerStatefulWidget {
   const AdminTeachersScreen({super.key});
@@ -146,8 +147,9 @@ class _AdminTeachersScreenState extends ConsumerState<AdminTeachersScreen> {
         )
         .toList();
 
-    return Scaffold(
-      body: SafeArea(
+    return AdminAccessGuard(
+      child: Scaffold(
+        body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(20, 22, 20, 16),
           child: Column(
@@ -329,6 +331,7 @@ class _AdminTeachersScreenState extends ConsumerState<AdminTeachersScreen> {
           ),
         ),
       ),
+    ),
     );
   }
 

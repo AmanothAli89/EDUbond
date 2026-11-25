@@ -22,10 +22,6 @@ abstract final class AppConstants {
   // Cloud File Upload Endpoint
   static const String catboxUploadUrl = 'https://catbox.moe/user/api.php';
 
-  // Fallback Admin Credentials (used only when admin_config/credentials doc does not exist)
-  static const String fallbackAdminId = 'Bappy';
-  static const String fallbackAdminPass = 'Bappy81';
-
   // Developer Info (About Us)
   static const String developerName = 'Md. Lemon Islam Bappy';
   static const String developerDegree =

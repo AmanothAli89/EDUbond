@@ -9,6 +9,7 @@ import '../../models/quiz_attempt_model.dart';
 import '../../models/user_model.dart';
 import '../../models/user_role_model.dart';
 import '../../shared/widgets/empty_state_view.dart';
+import 'admin_access_guard.dart';
 
 class AdminUsersScreen extends ConsumerStatefulWidget {
   const AdminUsersScreen({super.key});
@@ -140,6 +141,71 @@ class _AdminUsersScreenState extends ConsumerState<AdminUsersScreen> {
     }
   }
 
+  Future<void> _showUserDetailsDialog(UserModel user) async {
+    var roles = const <UserRoleModel>[];
+    try {
+      if (user.email.isNotEmpty) {
+        roles = await ref
+            .read(subjectRepositoryProvider)
+            .getUserSubjectRoles(user.email);
+      }
+    } catch (_) {}
+    if (!mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(user.username.isEmpty ? 'User Details' : user.username),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('Email: ${user.email}'),
+              const SizedBox(height: 6),
+              Text('UID: ${user.uid}'),
+              const SizedBox(height: 6),
+              Text('Provider: ${user.loginProvider}'),
+              const SizedBox(height: 6),
+              Text(
+                'Google Verified: ${user.googleVerified ? "Yes" : "No"}',
+              ),
+              const SizedBox(height: 6),
+              Text('Password Set: ${user.passwordSet ? "Yes" : "No"}'),
+              if (user.biodata.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text('Biodata: ${user.biodata}'),
+              ],
+              const SizedBox(height: 12),
+              const Text(
+                'Subject Roles:',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 4),
+              if (roles.isEmpty)
+                const Text('No subject roles assigned.')
+              else
+                ...roles.map(
+                  (r) => Padding(
+                    padding: const EdgeInsets.only(bottom: 2),
+                    child: Text(
+                      '• ${r.subject}: ${r.role}${r.isTeacher ? " (Score ${r.score}/10)" : ""}',
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _confirmRemoveUser(UserModel user) async {
     final ok = await showDialog<bool>(
       context: context,
@@ -254,8 +320,9 @@ class _AdminUsersScreenState extends ConsumerState<AdminUsersScreen> {
                 ? 'Showing ${filteredTeachers.length} active teachers'
                 : 'Showing ${filteredBlocked.length} blocked teachers';
 
-    return Scaffold(
-      body: SafeArea(
+    return AdminAccessGuard(
+      child: Scaffold(
+        body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(20, 22, 20, 16),
           child: Column(
@@ -352,6 +419,7 @@ class _AdminUsersScreenState extends ConsumerState<AdminUsersScreen> {
           ),
         ),
       ),
+    ),
     );
   }
 
@@ -367,48 +435,66 @@ class _AdminUsersScreenState extends ConsumerState<AdminUsersScreen> {
         final u = users[idx];
         return Padding(
           padding: const EdgeInsets.only(bottom: 14),
-          child: EduCard(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  u.username.isEmpty ? 'Unknown' : u.username,
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.textPrimary,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  u.email.isEmpty ? 'No Email' : u.email,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    color: AppColors.textMuted,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _smallActionBtn(
-                        'Add Role',
-                        AppColors.emeraldBright,
-                        () => _showAddRoleDialog(u.email),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(24),
+            onTap: () => _showUserDetailsDialog(u),
+            child: EduCard(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          u.username.isEmpty ? 'Unknown' : u.username,
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _smallActionBtn(
-                        'Remove',
-                        AppColors.dangerRed,
-                        () => _confirmRemoveUser(u),
+                      const Text(
+                        'Details',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.primaryBlue,
+                        ),
                       ),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    u.email.isEmpty ? 'No Email' : u.email,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      color: AppColors.textMuted,
                     ),
-                  ],
-                ),
-              ],
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _smallActionBtn(
+                          'Add Role',
+                          AppColors.emeraldBright,
+                          () => _showAddRoleDialog(u.email),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _smallActionBtn(
+                          'Remove',
+                          AppColors.dangerRed,
+                          () => _confirmRemoveUser(u),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
         );

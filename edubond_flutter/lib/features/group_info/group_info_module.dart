@@ -49,8 +49,18 @@ class _GroupInfoModulePageState extends ConsumerState<GroupInfoModulePage> {
       final qualified = await ref
           .read(subjectRepositoryProvider)
           .getQualifiedTeachers(group.subject);
-      final filtered =
-          qualified.where((t) => !group.teachers.contains(t)).toList();
+      final existingTeacherLower =
+          group.teachers.map((t) => t.toLowerCase()).toSet();
+      final filtered = qualified
+          .where((t) => !existingTeacherLower.contains(t.toLowerCase()))
+          .toList();
+
+      var pendingInvited = <String>{};
+      try {
+        pendingInvited = await ref
+            .read(groupRepositoryProvider)
+            .getPendingInvitedTeachersForGroup(group.id);
+      } catch (_) {}
 
       final allEmails = {...group.teachers, ...group.members, ...filtered};
       final authRepo = ref.read(authRepositoryProvider);
@@ -64,6 +74,9 @@ class _GroupInfoModulePageState extends ConsumerState<GroupInfoModulePage> {
       setState(() {
         _group = group;
         _availableTeachers = filtered;
+        _requestedTeachers
+          ..clear()
+          ..addAll(pendingInvited);
         _loading = false;
       });
     } catch (_) {
@@ -74,10 +87,10 @@ class _GroupInfoModulePageState extends ConsumerState<GroupInfoModulePage> {
   Future<void> _requestTeacher(String teacherEmail) async {
     final group = _group;
     if (group == null) return;
-    final currentUser = ref.read(authRepositoryProvider).currentLocalEmail;
+    final currentUser = ref.read(authRepositoryProvider).activeUserEmail;
 
     try {
-      await ref.read(groupRepositoryProvider).requestTeacherToJoin(
+      final sent = await ref.read(groupRepositoryProvider).requestTeacherToJoin(
             groupId: group.id,
             groupName: group.name,
             subject: group.subject,
@@ -86,7 +99,10 @@ class _GroupInfoModulePageState extends ConsumerState<GroupInfoModulePage> {
           );
       if (!mounted) return;
       setState(() => _requestedTeachers.add(teacherEmail));
-      showEduSnackBar(context, 'Request sent to teacher');
+      showEduSnackBar(
+        context,
+        sent ? 'Request sent to teacher' : 'Invitation already pending',
+      );
     } catch (_) {
       if (mounted) showEduSnackBar(context, 'Failed to send request');
     }
@@ -112,7 +128,7 @@ class _GroupInfoModulePageState extends ConsumerState<GroupInfoModulePage> {
     );
     if (confirmed != true) return;
 
-    final email = ref.read(authRepositoryProvider).currentLocalEmail;
+    final email = ref.read(authRepositoryProvider).activeUserEmail;
     try {
       await ref
           .read(groupRepositoryProvider)

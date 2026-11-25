@@ -16,7 +16,8 @@ class GroupsModulePage extends ConsumerStatefulWidget {
   ConsumerState<GroupsModulePage> createState() => _GroupsModulePageState();
 }
 
-class _GroupsModulePageState extends ConsumerState<GroupsModulePage> {
+class _GroupsModulePageState extends ConsumerState<GroupsModulePage>
+    with WidgetsBindingObserver {
   List<GroupModel> _groups = [];
   bool _loading = true;
   String? _error;
@@ -24,7 +25,21 @@ class _GroupsModulePageState extends ConsumerState<GroupsModulePage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadGroups();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _loadGroups();
+    }
   }
 
   Future<void> _loadGroups() async {
@@ -32,7 +47,7 @@ class _GroupsModulePageState extends ConsumerState<GroupsModulePage> {
       _loading = true;
       _error = null;
     });
-    final email = ref.read(authRepositoryProvider).currentLocalEmail;
+    final email = ref.read(authRepositoryProvider).activeUserEmail;
     try {
       final list =
           await ref.read(groupRepositoryProvider).getGroupsForUser(email);

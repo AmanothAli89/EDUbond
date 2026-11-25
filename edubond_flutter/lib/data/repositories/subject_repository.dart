@@ -1,7 +1,7 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/constants/firestore_collections.dart';
 import '../../core/utils/doc_id_helper.dart';
+import '../../models/subject_model.dart';
 import '../../models/subject_request_model.dart';
 import '../../models/user_role_model.dart';
 import '../datasources/firestore_datasource.dart';
@@ -11,29 +11,36 @@ class SubjectRepository {
 
   final FirestoreDataSource _firestore;
 
-  Future<List<String>> getGlobalSubjects() async {
-    final snap = await _firestore.getCollection(FirestoreCollections.subjects);
-    final list = snap.docs.map((doc) {
-      final name = doc.data()[FirestoreFields.name] as String?;
-      return (name != null && name.isNotEmpty) ? name : doc.id;
-    }).toList();
-
-    if (list.isEmpty) {
+  Future<List<SubjectModel>> getGlobalSubjectItems() async {
+    final records = await _firestore.getCollectionRecords(
+      FirestoreCollections.subjects,
+    );
+    if (records.isEmpty) {
+      final seeded = <SubjectModel>[];
       for (final name in AppConstants.coreSubjects) {
+        final docId = DocIdHelper.subjectDocId(name);
+        final model = SubjectModel(id: docId, name: name, type: 'core');
         await _firestore.setDoc(
           FirestoreCollections.subjects,
-          DocIdHelper.subjectDocId(name),
-          {
-            FirestoreFields.name: name,
-            FirestoreFields.type: 'core',
-          },
+          docId,
+          model.toMap(),
         );
+        seeded.add(model);
       }
-      return List<String>.from(AppConstants.coreSubjects);
+      seeded.sort((a, b) => a.name.compareTo(b.name));
+      return seeded;
     }
 
-    list.sort();
+    final list = records
+        .map((r) => SubjectModel.fromMap(r.data, docId: r.id))
+        .toList();
+    list.sort((a, b) => a.name.compareTo(b.name));
     return list;
+  }
+
+  Future<List<String>> getGlobalSubjects() async {
+    final items = await getGlobalSubjectItems();
+    return items.map((s) => s.name).toList();
   }
 
   Future<void> addSubjectGlobally(String name) {
@@ -75,13 +82,28 @@ class SubjectRepository {
   }
 
   Future<List<SubjectRequestModel>> getSubjectRequests() async {
-    final snap = await _firestore.raw
-        .collection(FirestoreCollections.subjectRequests)
-        .orderBy(FirestoreFields.timestamp, descending: true)
-        .get();
-    return snap.docs
-        .map((doc) => SubjectRequestModel.fromMap(doc.data()))
+    final records = await _firestore.queryRecords(
+      FirestoreCollections.subjectRequests,
+      orderByField: FirestoreFields.timestamp,
+      descending: true,
+    );
+    return records
+        .map((r) => SubjectRequestModel.fromMap(r.data))
         .toList();
+  }
+
+  Future<List<SubjectRequestModel>> getUserSubjectRequests(String email) async {
+    final trimmed = email.trim();
+    if (trimmed.isEmpty) return const <SubjectRequestModel>[];
+    final records = await _firestore.queryRecords(
+      FirestoreCollections.subjectRequests,
+      isEqualTo: {FirestoreFields.by: trimmed},
+    );
+    final list = records
+        .map((r) => SubjectRequestModel.fromMap(r.data))
+        .toList();
+    list.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+    return list;
   }
 
   Future<void> updateSubjectRequestStatus({
@@ -121,23 +143,25 @@ class SubjectRepository {
   }
 
   Future<List<UserRoleModel>> getUserSubjectRoles(String email) async {
-    final snap = await _firestore.raw
-        .collection(FirestoreCollections.userRoles)
-        .where(FirestoreFields.email, isEqualTo: email)
-        .get();
-    return snap.docs
-        .map((doc) => UserRoleModel.fromMap(doc.data(), docId: doc.id))
+    final records = await _firestore.queryRecords(
+      FirestoreCollections.userRoles,
+      isEqualTo: {FirestoreFields.email: email},
+    );
+    return records
+        .map((r) => UserRoleModel.fromMap(r.data, docId: r.id))
         .toList();
   }
 
   Future<List<String>> getQualifiedTeachers(String subject) async {
-    final QuerySnapshot<Map<String, dynamic>> snap = await _firestore.raw
-        .collection(FirestoreCollections.userRoles)
-        .where(FirestoreFields.subject, isEqualTo: subject)
-        .where(FirestoreFields.role, isEqualTo: 'teacher')
-        .get();
-    return snap.docs
-        .map((doc) => doc.data()[FirestoreFields.email] as String?)
+    final records = await _firestore.queryRecords(
+      FirestoreCollections.userRoles,
+      isEqualTo: {
+        FirestoreFields.subject: subject,
+        FirestoreFields.role: 'teacher',
+      },
+    );
+    return records
+        .map((r) => r.data[FirestoreFields.email] as String?)
         .whereType<String>()
         .toList();
   }

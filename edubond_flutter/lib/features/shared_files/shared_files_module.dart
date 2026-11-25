@@ -1,9 +1,9 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/services/providers.dart';
 import '../../core/utils/date_formatter.dart';
+import '../../core/utils/file_viewer_helper.dart';
 import '../../core/widgets/edu_card.dart';
 import '../../core/widgets/edu_header_and_tiles.dart';
 import '../../models/message_model.dart';
@@ -32,18 +32,6 @@ class _SharedFilesModulePageState extends ConsumerState<SharedFilesModulePage> {
       }
     }).catchError((_) {});
     return email;
-  }
-
-  Future<void> _openFile(String url) async {
-    final uri = Uri.tryParse(url);
-    if (uri == null) {
-      showEduSnackBar(context, 'Could not open file');
-      return;
-    }
-    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
-    if (!ok && mounted) {
-      showEduSnackBar(context, 'Could not open file');
-    }
   }
 
   Future<void> _confirmUnsend(MessageModel msg) async {
@@ -78,7 +66,7 @@ class _SharedFilesModulePageState extends ConsumerState<SharedFilesModulePage> {
 
   @override
   Widget build(BuildContext context) {
-    final currentUser = ref.read(authRepositoryProvider).currentLocalEmail;
+    final currentUser = ref.read(authRepositoryProvider).activeUserEmail;
 
     return Scaffold(
       body: SafeArea(
@@ -118,20 +106,30 @@ class _SharedFilesModulePageState extends ConsumerState<SharedFilesModulePage> {
                             itemCount: files.length,
                             itemBuilder: (context, index) {
                               final msg = files[index];
-                              final isImage =
-                                  (msg.fileType ?? '').contains('image');
+                              final isImage = FileViewerHelper.isImageType(
+                                msg.fileType,
+                                msg.fileUrl,
+                              );
                               final isOwner = msg.senderEmail.toLowerCase() ==
                                   currentUser.toLowerCase();
                               final uploader = _resolveName(msg.senderEmail);
                               final time = DateFormatter.formatMessageTime(
                                 msg.timestamp,
                               );
+                              final typeLabel = FileViewerHelper.displayFileType(
+                                msg.fileType,
+                              );
 
                               return Padding(
                                 padding: const EdgeInsets.only(bottom: 12),
                                 child: InkWell(
                                   borderRadius: BorderRadius.circular(16),
-                                  onTap: () => _openFile(msg.fileUrl!),
+                                  onTap: () => FileViewerHelper.openSharedFile(
+                                    context,
+                                    url: msg.fileUrl!,
+                                    fileType: msg.fileType,
+                                    fileName: msg.fileName,
+                                  ),
                                   onLongPress: isOwner
                                       ? () => _confirmUnsend(msg)
                                       : null,
@@ -162,7 +160,7 @@ class _SharedFilesModulePageState extends ConsumerState<SharedFilesModulePage> {
                                               ),
                                               const SizedBox(height: 2),
                                               Text(
-                                                'Shared by $uploader • $time',
+                                                '$typeLabel • Shared by $uploader • $time',
                                                 style: const TextStyle(
                                                   fontSize: 12,
                                                   color: AppColors.textMuted,
@@ -170,6 +168,11 @@ class _SharedFilesModulePageState extends ConsumerState<SharedFilesModulePage> {
                                               ),
                                             ],
                                           ),
+                                        ),
+                                        const Icon(
+                                          Icons.open_in_new_rounded,
+                                          size: 18,
+                                          color: AppColors.primaryBlue,
                                         ),
                                       ],
                                     ),

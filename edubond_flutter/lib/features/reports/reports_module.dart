@@ -8,6 +8,7 @@ import '../../core/widgets/edu_card.dart';
 import '../../core/widgets/edu_header_and_tiles.dart';
 import '../../data/repositories/admin_repository.dart';
 import '../../shared/widgets/error_banner.dart';
+import '../admin/admin_access_guard.dart';
 
 class ReportsModulePage extends ConsumerStatefulWidget {
   const ReportsModulePage({super.key});
@@ -52,8 +53,9 @@ class _ReportsModulePageState extends ConsumerState<ReportsModulePage> {
   @override
   Widget build(BuildContext context) {
     final summary = _summary;
-    return Scaffold(
-      body: SafeArea(
+    return AdminAccessGuard(
+      child: Scaffold(
+        body: SafeArea(
         child: RefreshIndicator(
           onRefresh: _loadReports,
           child: SingleChildScrollView(
@@ -119,6 +121,7 @@ class _ReportsModulePageState extends ConsumerState<ReportsModulePage> {
           ),
         ),
       ),
+    ),
     );
   }
 }

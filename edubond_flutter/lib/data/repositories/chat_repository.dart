@@ -1,5 +1,4 @@
 import 'dart:typed_data';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../core/constants/firestore_collections.dart';
 import '../../models/message_model.dart';
 import '../../models/note_model.dart';
@@ -21,17 +20,18 @@ class ChatRepository {
   final FirebaseStorageDataSource _storage;
 
   Stream<List<MessageModel>> watchGroupMessages(String groupId) {
-    return _firestore.raw
-        .collection(FirestoreCollections.groups)
-        .doc(groupId)
-        .collection(FirestoreCollections.messagesSubcollection)
-        .orderBy(FirestoreFields.timestamp)
-        .snapshots()
-        .map((snap) {
-      return snap.docs
-          .map((doc) => MessageModel.fromMap(doc.data(), docId: doc.id))
-          .toList();
-    });
+    return _firestore
+        .watchSubcollection(
+          FirestoreCollections.groups,
+          groupId,
+          FirestoreCollections.messagesSubcollection,
+          orderByField: FirestoreFields.timestamp,
+        )
+        .map(
+          (records) => records
+              .map((r) => MessageModel.fromMap(r.data, docId: r.id))
+              .toList(),
+        );
   }
 
   Future<void> sendMessage({
@@ -53,11 +53,12 @@ class ChatRepository {
       timestamp: DateTime.now().millisecondsSinceEpoch,
       seenBy: [senderEmail],
     );
-    await _firestore.raw
-        .collection(FirestoreCollections.groups)
-        .doc(groupId)
-        .collection(FirestoreCollections.messagesSubcollection)
-        .add(msg.toMap());
+    await _firestore.addSubcollectionDoc(
+      FirestoreCollections.groups,
+      groupId,
+      FirestoreCollections.messagesSubcollection,
+      msg.toMap(),
+    );
 
     await _firestore.logActivity(senderEmail, 'Sent a message in group: $groupId');
   }
@@ -67,26 +68,26 @@ class ChatRepository {
     required String messageId,
     required String email,
   }) {
-    return _firestore.raw
-        .collection(FirestoreCollections.groups)
-        .doc(groupId)
-        .collection(FirestoreCollections.messagesSubcollection)
-        .doc(messageId)
-        .update({
-      FirestoreFields.seenBy: FieldValue.arrayUnion([email]),
-    });
+    return _firestore.arrayUnionSubcollectionField(
+      FirestoreCollections.groups,
+      groupId,
+      FirestoreCollections.messagesSubcollection,
+      messageId,
+      FirestoreFields.seenBy,
+      email,
+    );
   }
 
   Future<void> deleteMessage({
     required String groupId,
     required String messageId,
   }) {
-    return _firestore.raw
-        .collection(FirestoreCollections.groups)
-        .doc(groupId)
-        .collection(FirestoreCollections.messagesSubcollection)
-        .doc(messageId)
-        .delete();
+    return _firestore.deleteSubcollectionDoc(
+      FirestoreCollections.groups,
+      groupId,
+      FirestoreCollections.messagesSubcollection,
+      messageId,
+    );
   }
 
   Future<void> shareMeetingLink({
@@ -106,32 +107,30 @@ class ChatRepository {
   }
 
   static String detectMeetingPlatform(String url) {
-    if (url.contains('zoom')) return 'Zoom';
-    if (url.contains('meet.google')) return 'Google Meet';
-    if (url.contains('jitsi')) return 'Jitsi';
+    final lower = url.toLowerCase();
+    if (lower.contains('zoom')) return 'Zoom';
+    if (lower.contains('meet.google')) return 'Google Meet';
+    if (lower.contains('jitsi') || lower.contains('jit.si')) return 'Jitsi';
     return 'Live';
   }
 
-  Future<void> uploadAndShareFile({
+  /// Primary upload path preserving original Kotlin `uploadFileFree` behavior:
+  /// uploads via Catbox (`https://catbox.moe/user/api.php`, `reqtype=fileupload`)
+  /// and saves the resulting file URL as a group message without silently
+  /// switching storage providers on failure.
+  Future<String> uploadAndShareFile({
     required String groupId,
     required String senderEmail,
     required Uint8List bytes,
     required String fileName,
     required String fileType,
-    bool useFirebaseStorageFallback = true,
+    void Function(double progress)? onProgress,
   }) async {
-    String url;
-    try {
-      url = await _catbox.uploadFileBytes(bytes: bytes, fileName: fileName);
-    } catch (e) {
-      if (!useFirebaseStorageFallback) rethrow;
-      url = await _storage.uploadGroupFile(
-        groupId: groupId,
-        bytes: bytes,
-        fileName: fileName,
-        contentType: fileType,
-      );
-    }
+    final url = await _catbox.uploadFileBytes(
+      bytes: bytes,
+      fileName: fileName,
+      onProgress: onProgress,
+    );
 
     await sendMessage(
       groupId: groupId,
@@ -141,6 +140,35 @@ class ChatRepository {
       fileType: fileType,
       fileName: fileName,
     );
+    return url;
+  }
+
+  /// Firebase Storage helper method mirroring Kotlin `uploadFileToFirebase`.
+  Future<String> uploadAndShareFileToFirebaseStorage({
+    required String groupId,
+    required String senderEmail,
+    required Uint8List bytes,
+    required String fileName,
+    required String fileType,
+    void Function(double progress)? onProgress,
+  }) async {
+    final url = await _storage.uploadGroupFile(
+      groupId: groupId,
+      bytes: bytes,
+      fileName: fileName,
+      contentType: fileType,
+      onProgress: onProgress,
+    );
+
+    await sendMessage(
+      groupId: groupId,
+      senderEmail: senderEmail,
+      messageText: 'Shared a file',
+      fileUrl: url,
+      fileType: fileType,
+      fileName: fileName,
+    );
+    return url;
   }
 
   Future<void> addNote({
@@ -162,11 +190,12 @@ class ChatRepository {
   }
 
   Future<List<NoteModel>> getNotes(String groupId) async {
-    final snap = await _firestore.raw
-        .collection(FirestoreCollections.notes)
-        .where(FirestoreFields.groupId, isEqualTo: groupId)
-        .orderBy(FirestoreFields.timestamp, descending: true)
-        .get();
-    return snap.docs.map((doc) => NoteModel.fromMap(doc.data())).toList();
+    final records = await _firestore.queryRecords(
+      FirestoreCollections.notes,
+      isEqualTo: {FirestoreFields.groupId: groupId},
+      orderByField: FirestoreFields.timestamp,
+      descending: true,
+    );
+    return records.map((r) => NoteModel.fromMap(r.data)).toList();
   }
 }

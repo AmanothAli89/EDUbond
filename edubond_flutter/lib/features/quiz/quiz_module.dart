@@ -14,33 +14,66 @@ import '../../models/quiz_question_model.dart';
 enum _QuizStage { loading, rules, exam, result }
 
 class QuizModulePage extends ConsumerStatefulWidget {
-  const QuizModulePage({super.key, this.subject = ''});
+  const QuizModulePage({
+    super.key,
+    this.subject = '',
+    this.initialDurationSeconds = AppConstants.quizDurationSeconds,
+  });
 
   final String subject;
+  final int initialDurationSeconds;
 
   @override
   ConsumerState<QuizModulePage> createState() => _QuizModulePageState();
 }
 
-class _QuizModulePageState extends ConsumerState<QuizModulePage> {
+class _QuizModulePageState extends ConsumerState<QuizModulePage>
+    with WidgetsBindingObserver {
   _QuizStage _stage = _QuizStage.loading;
   List<QuizQuestionModel> _questions = [];
   List<String?> _selectedAnswers = [];
   Timer? _timer;
-  int _remainingSeconds = AppConstants.quizDurationSeconds;
+  late int _remainingSeconds;
+  DateTime? _pausedAt;
   bool _submitting = false;
+  bool _submitted = false;
   QuizSubmissionOutcome? _outcome;
 
   @override
   void initState() {
     super.initState();
+    _remainingSeconds = widget.initialDurationSeconds;
+    WidgetsBinding.instance.addObserver(this);
     _prepareQuiz();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (_stage != _QuizStage.exam || _submitted) return;
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive) {
+      _pausedAt ??= DateTime.now();
+    } else if (state == AppLifecycleState.resumed && _pausedAt != null) {
+      final elapsed = DateTime.now().difference(_pausedAt!).inSeconds;
+      _pausedAt = null;
+      if (elapsed <= 0 || !mounted) return;
+      final nextRemaining = _remainingSeconds - elapsed;
+      if (nextRemaining <= 0) {
+        _timer?.cancel();
+        setState(() => _remainingSeconds = 0);
+        showEduSnackBar(context, 'Time is up! Submitting automatically...');
+        _submitQuiz(autoSubmit: true);
+      } else {
+        setState(() => _remainingSeconds = nextRemaining);
+      }
+    }
   }
 
   Future<void> _prepareQuiz() async {
@@ -49,7 +82,7 @@ class _QuizModulePageState extends ConsumerState<QuizModulePage> {
       return;
     }
 
-    final email = ref.read(authRepositoryProvider).currentLocalEmail;
+    final email = ref.read(authRepositoryProvider).activeUserEmail;
     final quizRepo = ref.read(quizRepositoryProvider);
 
     try {
@@ -74,7 +107,10 @@ class _QuizModulePageState extends ConsumerState<QuizModulePage> {
       if (!mounted) return;
 
       final totalAttempts = status?.totalAttempts ?? 0;
-      if (sets.isEmpty) {
+      final hasFullSet = sets.any(
+        (s) => s.length >= AppConstants.quizTotalQuestions,
+      );
+      if (sets.isEmpty || !hasFullSet) {
         showEduSnackBar(
           context,
           'Quiz questions are not set yet. Please contact admin.',
@@ -83,7 +119,10 @@ class _QuizModulePageState extends ConsumerState<QuizModulePage> {
         return;
       }
 
-      final setIndex = totalAttempts % sets.length;
+      final setIndex = QuizRepository.selectSetIndex(
+        totalAttempts: totalAttempts,
+        setCount: sets.length,
+      );
       final selectedSet = sets[setIndex];
       if (selectedSet.length < AppConstants.quizTotalQuestions) {
         showEduSnackBar(
@@ -109,7 +148,10 @@ class _QuizModulePageState extends ConsumerState<QuizModulePage> {
 
   void _startExam() {
     setState(() {
-      _remainingSeconds = AppConstants.quizDurationSeconds;
+      _remainingSeconds = widget.initialDurationSeconds;
+      _pausedAt = null;
+      _submitting = false;
+      _submitted = false;
       _stage = _QuizStage.exam;
     });
     _timer?.cancel();
@@ -130,7 +172,7 @@ class _QuizModulePageState extends ConsumerState<QuizModulePage> {
   }
 
   Future<void> _submitQuiz({bool autoSubmit = false}) async {
-    if (_submitting) return;
+    if (_submitting || _submitted) return;
     if (!autoSubmit && _selectedAnswers.any((a) => a == null)) {
       showEduSnackBar(context, 'Please answer all questions before submitting');
       return;
@@ -138,7 +180,7 @@ class _QuizModulePageState extends ConsumerState<QuizModulePage> {
 
     _timer?.cancel();
     setState(() => _submitting = true);
-    final email = ref.read(authRepositoryProvider).currentLocalEmail;
+    final email = ref.read(authRepositoryProvider).activeUserEmail;
 
     try {
       final outcome = await ref.read(quizRepositoryProvider).submitQuizAnswers(
@@ -151,6 +193,7 @@ class _QuizModulePageState extends ConsumerState<QuizModulePage> {
       setState(() {
         _outcome = outcome;
         _submitting = false;
+        _submitted = true;
         _stage = _QuizStage.result;
       });
     } catch (e) {
@@ -161,23 +204,50 @@ class _QuizModulePageState extends ConsumerState<QuizModulePage> {
     }
   }
 
+  Future<void> _confirmLeaveExam() async {
+    final shouldLeave = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Leave Examination?'),
+        content: const Text(
+          'Your exam timer is running. Are you sure you want to leave without submitting?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Stay'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Leave'),
+          ),
+        ],
+      ),
+    );
+    if (shouldLeave == true && mounted) {
+      _timer?.cancel();
+      Navigator.of(context).pop();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    if (_stage == _QuizStage.loading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
-    }
-
-    if (_stage == _QuizStage.rules) {
-      return _buildRulesScreen();
-    }
-
-    if (_stage == _QuizStage.result && _outcome != null) {
-      return _buildResultScreen(_outcome!);
-    }
-
-    return _buildExamScreen();
+    return PopScope(
+      canPop: _stage != _QuizStage.exam,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && _stage == _QuizStage.exam) {
+          _confirmLeaveExam();
+        }
+      },
+      child: switch (_stage) {
+        _QuizStage.loading => const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          ),
+        _QuizStage.rules => _buildRulesScreen(),
+        _QuizStage.result when _outcome != null => _buildResultScreen(_outcome!),
+        _ => _buildExamScreen(),
+      },
+    );
   }
 
   Widget _buildRulesScreen() {
@@ -288,7 +358,7 @@ class _QuizModulePageState extends ConsumerState<QuizModulePage> {
                       vertical: 6,
                     ),
                     decoration: BoxDecoration(
-                      color: AppColors.timerBg,
+                      color: lowTime ? AppColors.timerBg : AppColors.softBlue,
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(
@@ -297,7 +367,8 @@ class _QuizModulePageState extends ConsumerState<QuizModulePage> {
                         fontSize: 17,
                         fontFamily: 'monospace',
                         fontWeight: FontWeight.bold,
-                        color: lowTime ? Colors.red : AppColors.timerRed,
+                        color:
+                            lowTime ? AppColors.timerRed : AppColors.textPrimary,
                       ),
                     ),
                   ),
@@ -342,27 +413,30 @@ class _QuizModulePageState extends ConsumerState<QuizModulePage> {
                             ),
                           ),
                           const SizedBox(height: 8),
-                          RadioGroup<String>(
-                            groupValue: _selectedAnswers[index],
-                            onChanged: (value) {
-                              setState(() => _selectedAnswers[index] = value);
-                            },
-                            child: Column(
-                              children: q.options
-                                  .map(
-                                    (opt) => RadioListTile<String>(
-                                      value: opt,
-                                      contentPadding: EdgeInsets.zero,
-                                      dense: true,
-                                      title: Text(
-                                        opt,
-                                        style: const TextStyle(
-                                          color: AppColors.textSlate,
+                          Material(
+                            type: MaterialType.transparency,
+                            child: RadioGroup<String>(
+                              groupValue: _selectedAnswers[index],
+                              onChanged: (value) {
+                                setState(() => _selectedAnswers[index] = value);
+                              },
+                              child: Column(
+                                children: q.options
+                                    .map(
+                                      (opt) => RadioListTile<String>(
+                                        value: opt,
+                                        contentPadding: EdgeInsets.zero,
+                                        dense: true,
+                                        title: Text(
+                                          opt,
+                                          style: const TextStyle(
+                                            color: AppColors.textSlate,
+                                          ),
                                         ),
                                       ),
-                                    ),
-                                  )
-                                  .toList(),
+                                    )
+                                    .toList(),
+                              ),
                             ),
                           ),
                         ],
@@ -380,6 +454,7 @@ class _QuizModulePageState extends ConsumerState<QuizModulePage> {
 
   Widget _buildResultScreen(QuizSubmissionOutcome outcome) {
     final color = outcome.passed ? AppColors.emerald : AppColors.dangerRed;
+    final remaining = (AppConstants.quizMaxAttempts - outcome.attempts).clamp(0, AppConstants.quizMaxAttempts);
     final title = outcome.passed
         ? 'Congratulations! You Passed!'
         : (outcome.blocked ? 'Subject Blocked' : 'Quiz Failed');
@@ -387,7 +462,7 @@ class _QuizModulePageState extends ConsumerState<QuizModulePage> {
         ? 'You are now a verified teacher for ${widget.subject}.'
         : (outcome.blocked
             ? 'You have reached the maximum of 2 failed attempts for ${widget.subject}.'
-            : 'Minimum passing score is 7/10. You have 1 attempt left.');
+            : 'Minimum passing score is 7/10. You have $remaining attempt left.');
 
     return Scaffold(
       body: SafeArea(

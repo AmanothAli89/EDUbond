@@ -1,6 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/constants/app_colors.dart';
+import '../../core/constants/app_constants.dart';
 import '../../core/routes/app_routes.dart';
 import '../../core/services/providers.dart';
 import '../../core/widgets/custom_painters.dart';
@@ -26,6 +27,8 @@ class _SubjectDetailScreenState extends ConsumerState<SubjectDetailScreen> {
   bool _busy = false;
   bool _loadingGroups = false;
   List<GroupModel> _groups = [];
+  final Set<String> _pendingJoinGroupIds = {};
+  final Set<String> _sendingRequestGroupIds = {};
   final _groupNameCtrl = TextEditingController();
 
   @override
@@ -35,7 +38,12 @@ class _SubjectDetailScreenState extends ConsumerState<SubjectDetailScreen> {
   }
 
   Future<void> _selectStudy() async {
-    final email = ref.read(authRepositoryProvider).currentLocalEmail;
+    final email = ref.read(authRepositoryProvider).activeUserEmail;
+    if (email.isEmpty) {
+      showEduSnackBar(context, 'Please sign in again.');
+      return;
+    }
+
     setState(() => _busy = true);
     try {
       await ref.read(subjectRepositoryProvider).addSubjectRole(
@@ -59,7 +67,12 @@ class _SubjectDetailScreenState extends ConsumerState<SubjectDetailScreen> {
   }
 
   Future<void> _selectTeach() async {
-    final email = ref.read(authRepositoryProvider).currentLocalEmail;
+    final email = ref.read(authRepositoryProvider).activeUserEmail;
+    if (email.isEmpty) {
+      showEduSnackBar(context, 'Please sign in again.');
+      return;
+    }
+
     setState(() => _busy = true);
     try {
       final roles =
@@ -81,7 +94,8 @@ class _SubjectDetailScreenState extends ConsumerState<SubjectDetailScreen> {
             subject: widget.subject,
           );
       if (!mounted) return;
-      if (attempt?.blocked == true) {
+      if (attempt?.blocked == true ||
+          (attempt?.attempts ?? 0) >= AppConstants.quizMaxAttempts) {
         showEduSnackBar(
           context,
           'You are blocked from teaching ${widget.subject} due to previous failed attempts.',
@@ -101,14 +115,28 @@ class _SubjectDetailScreenState extends ConsumerState<SubjectDetailScreen> {
   }
 
   Future<void> _loadGroups() async {
+    final email = ref.read(authRepositoryProvider).activeUserEmail;
     setState(() => _loadingGroups = true);
     try {
-      final list = await ref
-          .read(groupRepositoryProvider)
-          .getGroupsBySubject(widget.subject);
+      final groupRepo = ref.read(groupRepositoryProvider);
+      final list = await groupRepo.getGroupsBySubject(widget.subject);
+      final pendingIds = <String>{};
+      if (email.isNotEmpty) {
+        try {
+          final sent = await groupRepo.getSentRequests(email);
+          for (final req in sent) {
+            if (req.status == 'pending' && req.groupId.isNotEmpty) {
+              pendingIds.add(req.groupId);
+            }
+          }
+        } catch (_) {}
+      }
       if (!mounted) return;
       setState(() {
         _groups = list;
+        _pendingJoinGroupIds
+          ..clear()
+          ..addAll(pendingIds);
         _loadingGroups = false;
       });
     } catch (_) {
@@ -122,7 +150,7 @@ class _SubjectDetailScreenState extends ConsumerState<SubjectDetailScreen> {
       showEduSnackBar(context, 'Please enter a group name');
       return;
     }
-    final email = ref.read(authRepositoryProvider).currentLocalEmail;
+    final email = ref.read(authRepositoryProvider).activeUserEmail;
     setState(() => _busy = true);
     try {
       await ref.read(groupRepositoryProvider).createGroup(
@@ -138,6 +166,31 @@ class _SubjectDetailScreenState extends ConsumerState<SubjectDetailScreen> {
       if (mounted) showEduSnackBar(context, 'Failed to create group');
     } finally {
       if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _requestJoin(GroupModel group, String email) async {
+    if (_sendingRequestGroupIds.contains(group.id)) return;
+    setState(() => _sendingRequestGroupIds.add(group.id));
+    try {
+      final created = await ref.read(groupRepositoryProvider).requestToJoinGroup(
+            groupId: group.id,
+            groupName: group.name,
+            subject: widget.subject,
+            requesterEmail: email,
+          );
+      if (!mounted) return;
+      setState(() => _pendingJoinGroupIds.add(group.id));
+      showEduSnackBar(
+        context,
+        created ? 'Request sent!' : 'Request already pending.',
+      );
+    } catch (_) {
+      if (mounted) {
+        showEduSnackBar(context, 'Failed to send request');
+      }
+    } finally {
+      if (mounted) setState(() => _sendingRequestGroupIds.remove(group.id));
     }
   }
 
@@ -264,7 +317,7 @@ class _SubjectDetailScreenState extends ConsumerState<SubjectDetailScreen> {
   }
 
   Widget _buildGroupsView() {
-    final email = ref.read(authRepositoryProvider).currentLocalEmail;
+    final email = ref.read(authRepositoryProvider).activeUserEmail;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -325,6 +378,8 @@ class _SubjectDetailScreenState extends ConsumerState<SubjectDetailScreen> {
         else
           ..._groups.map((group) {
             final inGroup = group.containsUser(email);
+            final isPending = _pendingJoinGroupIds.contains(group.id);
+            final isSending = _sendingRequestGroupIds.contains(group.id);
             return Padding(
               padding: const EdgeInsets.only(bottom: 14),
               child: EduCard(
@@ -350,38 +405,21 @@ class _SubjectDetailScreenState extends ConsumerState<SubjectDetailScreen> {
                     ),
                     const SizedBox(height: 14),
                     ElevatedButton(
-                      onPressed: () async {
-                        if (inGroup) {
-                          Navigator.of(context).pushNamed(
-                            AppRoutes.chat,
-                            arguments: {
-                              'groupId': group.id,
-                              'groupName': group.name,
-                            },
-                          );
-                        } else {
-                          try {
-                            await ref
-                                .read(groupRepositoryProvider)
-                                .requestToJoinGroup(
-                                  groupId: group.id,
-                                  groupName: group.name,
-                                  subject: widget.subject,
-                                  requesterEmail: email,
+                      onPressed: isSending || (!inGroup && isPending)
+                          ? null
+                          : () {
+                              if (inGroup) {
+                                Navigator.of(context).pushNamed(
+                                  AppRoutes.chat,
+                                  arguments: {
+                                    'groupId': group.id,
+                                    'groupName': group.name,
+                                  },
                                 );
-                            if (mounted) {
-                              showEduSnackBar(context, 'Request sent!');
-                            }
-                          } catch (_) {
-                            if (mounted) {
-                              showEduSnackBar(
-                                context,
-                                'Failed to send request',
-                              );
-                            }
-                          }
-                        }
-                      },
+                              } else {
+                                _requestJoin(group, email);
+                              }
+                            },
                       style: ElevatedButton.styleFrom(
                         backgroundColor:
                             inGroup ? AppColors.emerald : AppColors.softBlue,
@@ -394,7 +432,9 @@ class _SubjectDetailScreenState extends ConsumerState<SubjectDetailScreen> {
                         ),
                       ),
                       child: Text(
-                        inGroup ? 'Open Group' : 'Request to Join',
+                        inGroup
+                            ? 'Open Group'
+                            : (isPending ? 'Request Pending' : 'Request to Join'),
                         style: const TextStyle(fontWeight: FontWeight.bold),
                       ),
                     ),

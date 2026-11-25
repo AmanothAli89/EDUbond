@@ -21,18 +21,33 @@ class WeeklyReportsSummary {
 }
 
 class AdminRepository {
-  AdminRepository(this._firestore);
+  AdminRepository(
+    this._firestore, {
+    this.isAdminAuthorized,
+  });
 
   final FirestoreDataSource _firestore;
+  final bool Function()? isAdminAuthorized;
+
+  void _ensureAuthorized() {
+    final check = isAdminAuthorized;
+    if (check != null && !check()) {
+      throw StateError('Unauthorized: Admin authentication is required.');
+    }
+  }
 
   Future<List<UserModel>> getAllUsers() async {
-    final snap = await _firestore.getCollection(FirestoreCollections.users);
-    return snap.docs
-        .map((doc) => UserModel.fromMap(doc.data(), fallbackUid: doc.id))
+    _ensureAuthorized();
+    final records = await _firestore.getCollectionRecords(
+      FirestoreCollections.users,
+    );
+    return records
+        .map((r) => UserModel.fromMap(r.data, fallbackUid: r.id))
         .toList();
   }
 
   Future<void> removeUserDocument(String uid) {
+    _ensureAuthorized();
     return _firestore.deleteDoc(FirestoreCollections.users, uid);
   }
 
@@ -40,6 +55,7 @@ class AdminRepository {
     required String email,
     required String subject,
   }) {
+    _ensureAuthorized();
     final roleId = DocIdHelper.emailSubjectDocId(email, subject);
     final role = UserRoleModel(
       docId: roleId,
@@ -53,16 +69,18 @@ class AdminRepository {
   }
 
   Future<List<UserRoleModel>> getAllTeachers() async {
-    final snap = await _firestore.raw
-        .collection(FirestoreCollections.userRoles)
-        .where(FirestoreFields.role, isEqualTo: 'teacher')
-        .get();
-    return snap.docs
-        .map((doc) => UserRoleModel.fromMap(doc.data(), docId: doc.id))
+    _ensureAuthorized();
+    final records = await _firestore.queryRecords(
+      FirestoreCollections.userRoles,
+      isEqualTo: {FirestoreFields.role: 'teacher'},
+    );
+    return records
+        .map((r) => UserRoleModel.fromMap(r.data, docId: r.id))
         .toList();
   }
 
   Future<void> removeTeacherRoleByDocId(String docId) {
+    _ensureAuthorized();
     return _firestore.deleteDoc(FirestoreCollections.userRoles, docId);
   }
 
@@ -70,25 +88,26 @@ class AdminRepository {
     required String email,
     required String subject,
   }) {
+    _ensureAuthorized();
     return removeTeacherRoleByDocId(
       DocIdHelper.emailSubjectDocId(email, subject),
     );
   }
 
   Future<List<QuizAttemptModel>> getBlockedTeachers() async {
-    final snap = await _firestore.raw
-        .collection(FirestoreCollections.quizAttempts)
-        .where(FirestoreFields.blocked, isEqualTo: true)
-        .get();
-    return snap.docs
-        .map((doc) => QuizAttemptModel.fromMap(doc.data()))
-        .toList();
+    _ensureAuthorized();
+    final records = await _firestore.queryRecords(
+      FirestoreCollections.quizAttempts,
+      isEqualTo: {FirestoreFields.blocked: true},
+    );
+    return records.map((r) => QuizAttemptModel.fromMap(r.data)).toList();
   }
 
   Future<void> unblockTeacher({
     required String email,
     required String subject,
   }) {
+    _ensureAuthorized();
     final attemptId = DocIdHelper.emailSubjectDocId(email, subject);
     return _firestore.updateDoc(
       FirestoreCollections.quizAttempts,
@@ -100,41 +119,42 @@ class AdminRepository {
     );
   }
 
-  Future<WeeklyReportsSummary> fetchWeeklyReports() async {
-    final now = DateTime.now();
+  Future<WeeklyReportsSummary> fetchWeeklyReports({DateTime? anchorNow}) async {
+    _ensureAuthorized();
+    final now = anchorNow ?? DateTime.now();
     final weekAgoDate = now.subtract(const Duration(days: 7));
     final weekAgoMs = weekAgoDate.millisecondsSinceEpoch;
 
-    // Fetch collections cleanly and aggregate both Timestamp and int millis fields.
-    final usersSnap = await _firestore.getCollection(FirestoreCollections.users);
-    final groupsSnap = await _firestore.raw
-        .collection(FirestoreCollections.groups)
-        .where(FirestoreFields.timestamp, isGreaterThanOrEqualTo: weekAgoMs)
-        .get();
-    final teachersSnap = await _firestore.raw
-        .collection(FirestoreCollections.userRoles)
-        .where(FirestoreFields.role, isEqualTo: 'teacher')
-        .where(FirestoreFields.timestamp, isGreaterThanOrEqualTo: weekAgoMs)
-        .get();
+    final userRecords = await _firestore.getCollectionRecords(
+      FirestoreCollections.users,
+    );
+    final groupRecords = await _firestore.queryRecords(
+      FirestoreCollections.groups,
+      isGreaterThanOrEqualTo: {FirestoreFields.timestamp: weekAgoMs},
+    );
+    final teacherRecords = await _firestore.queryRecords(
+      FirestoreCollections.userRoles,
+      isEqualTo: {FirestoreFields.role: 'teacher'},
+    );
 
     final usersWeekly = _bucketByWeekday(
-      usersSnap.docs.map((d) => d.data()[FirestoreFields.updatedAt]),
+      userRecords.map((r) => r.data[FirestoreFields.updatedAt]),
       since: weekAgoDate,
       now: now,
     );
     final groupsWeekly = _bucketByWeekday(
-      groupsSnap.docs.map((d) => d.data()[FirestoreFields.timestamp]),
+      groupRecords.map((r) => r.data[FirestoreFields.timestamp]),
       since: weekAgoDate,
       now: now,
     );
     final teachersWeekly = _bucketByWeekday(
-      teachersSnap.docs.map((d) => d.data()[FirestoreFields.timestamp]),
+      teacherRecords.map((r) => r.data[FirestoreFields.timestamp]),
       since: weekAgoDate,
       now: now,
     );
 
     return WeeklyReportsSummary(
-      totalUsers: usersSnap.size,
+      totalUsers: userRecords.length,
       newUsersWeekly: usersWeekly,
       newGroupsWeekly: groupsWeekly,
       newTeachersWeekly: teachersWeekly,
@@ -151,7 +171,7 @@ class AdminRepository {
 
     for (final raw in rawDates) {
       final date = DateFormatter.parseFirestoreDate(raw);
-      if (date != null && !date.isBefore(since)) {
+      if (date != null && !date.isBefore(since) && !date.isAfter(now)) {
         final day = DateFormatter.formatWeekday(date);
         if (counts.containsKey(day)) {
           counts[day] = (counts[day] ?? 0) + 1;
