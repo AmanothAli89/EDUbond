@@ -17,7 +17,7 @@ abstract final class AppConstants {
 
   // Google Sign-In Server Client ID (client_type: 3 from google-services.json)
   static const String googleWebClientId =
-      '850714985586-f332vkjs0415ef9r6reoe7suade92jbn.apps.googleusercontent.com';
+      '314387118764-utq87d2na5soestlttj806iflcjdado0.apps.googleusercontent.com';
 
   // Cloud File Upload Endpoint
   static const String catboxUploadUrl = 'https://catbox.moe/user/api.php';

@@ -69,13 +69,17 @@ class AuthRepository {
   }
 
   Future<String> getUserNameByEmail(String email) async {
-    final snap = await _firestore.raw
-        .collection(FirestoreCollections.users)
-        .where(FirestoreFields.email, isEqualTo: email)
-        .get();
-    if (snap.docs.isEmpty) return email;
-    final name = snap.docs.first.data()[FirestoreFields.username] as String?;
-    return (name != null && name.isNotEmpty) ? name : email;
+    try {
+      final snap = await _firestore.raw
+          .collection(FirestoreCollections.users)
+          .where(FirestoreFields.email, isEqualTo: email)
+          .get();
+      if (snap.docs.isEmpty) return email;
+      final name = snap.docs.first.data()[FirestoreFields.username] as String?;
+      return (name != null && name.isNotEmpty) ? name : email;
+    } catch (_) {
+      return email;
+    }
   }
 
   Future<void> loginWithEmailAndPassword({
@@ -262,6 +266,30 @@ class AuthRepository {
     required String adminId,
     required String password,
   }) async {
+    final trimmedId = adminId.trim();
+    final trimmedPass = password.trim();
+
+    if (trimmedId.contains('@')) {
+      try {
+        await _auth.signInWithEmailAndPassword(
+          email: trimmedId,
+          password: trimmedPass,
+        );
+        final isClaimAdmin = await _auth.hasAdminCustomClaim(forceRefresh: true);
+        if (isClaimAdmin) {
+          await _local.logout();
+          _isAdminAuthorized = true;
+          return true;
+        }
+        await _auth.signOut();
+        _isAdminAuthorized = false;
+        return false;
+      } on FirebaseAuthException {
+        _isAdminAuthorized = false;
+        return false;
+      }
+    }
+
     final data = await _firestore.getDocData(
       FirestoreCollections.adminConfig,
       FirestoreCollections.adminCredentialsDoc,
@@ -278,8 +306,8 @@ class AuthRepository {
         dbId.isNotEmpty &&
         dbPass != null &&
         dbPass.isNotEmpty &&
-        adminId.trim() == dbId &&
-        password.trim() == dbPass;
+        trimmedId == dbId &&
+        trimmedPass == dbPass;
 
     if (matched) {
       await logout();

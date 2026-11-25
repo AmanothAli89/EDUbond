@@ -47,6 +47,7 @@ class FakeFirebaseAuthDataSource implements FirebaseAuthDataSource {
   bool sendPasswordResetCalled = false;
   String? lastPasswordResetEmail;
   bool linkedEmailPassword = false;
+  bool adminClaimGranted = false;
 
   void setCurrentUser(User? user) {
     _currentUser = user;
@@ -106,6 +107,11 @@ class FakeFirebaseAuthDataSource implements FirebaseAuthDataSource {
   Future<void> sendPasswordResetEmail(String email) async {
     sendPasswordResetCalled = true;
     lastPasswordResetEmail = email;
+  }
+
+  @override
+  Future<bool> hasAdminCustomClaim({bool forceRefresh = false}) async {
+    return adminClaimGranted;
   }
 
   @override
@@ -312,6 +318,28 @@ void main() {
       // Logout admin
       authRepo.logoutAdmin();
       expect(authRepo.isAdminAuthorized, isFalse);
+    });
+
+    test('Admin Login with Email & Custom Claim: authenticates via FirebaseAuth and requires admin claim', () async {
+      // Student email without admin claim must fail and sign out
+      fakeAuth.adminClaimGranted = false;
+      final nonAdminOk = await authRepo.loginAsAdmin(
+        adminId: 'student@gmail.com',
+        password: 'validPass123',
+      );
+      expect(nonAdminOk, isFalse);
+      expect(authRepo.isAdminAuthorized, isFalse);
+      expect(fakeAuth.currentUser, isNull);
+
+      // Admin email with { admin: true } claim succeeds and keeps FirebaseAuth signed in
+      fakeAuth.adminClaimGranted = true;
+      final adminOk = await authRepo.loginAsAdmin(
+        adminId: 'admin@gmail.com',
+        password: 'validPass123',
+      );
+      expect(adminOk, isTrue);
+      expect(authRepo.isAdminAuthorized, isTrue);
+      expect(fakeAuth.currentUser, isNotNull);
     });
 
     test('Logout & Session Restoration: hasValidSession requires both FirebaseAuth and SharedPreferences', () async {

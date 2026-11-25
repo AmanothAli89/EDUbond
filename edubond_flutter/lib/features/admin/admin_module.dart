@@ -29,7 +29,8 @@ class AdminModulePage extends ConsumerWidget {
       ),
     );
     if (ok == true && context.mounted) {
-      ref.read(authRepositoryProvider).logoutAdmin();
+      await ref.read(authRepositoryProvider).logout();
+      if (!context.mounted) return;
       Navigator.of(context)
           .pushNamedAndRemoveUntil(AppRoutes.auth, (_) => false);
     }

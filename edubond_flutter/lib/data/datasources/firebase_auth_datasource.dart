@@ -86,6 +86,13 @@ class FirebaseAuthDataSource {
     await _auth.currentUser?.reload();
   }
 
+  Future<bool> hasAdminCustomClaim({bool forceRefresh = false}) async {
+    final user = _auth.currentUser;
+    if (user == null) return false;
+    final tokenResult = await user.getIdTokenResult(forceRefresh);
+    return tokenResult.claims?['admin'] == true;
+  }
+
   Future<void> signOut() async {
     await _auth.signOut();
     if (_googleInitialized) {

@@ -1,0 +1,730 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model (EduBond / PeerMatrix - Project: edubond-64cc0)
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {uid} (matches Firebase Auth UID)
+    // Fields:
+    //   - uid: string (required, immutable, == uid)
+    //   - username: string (required, 0..100 chars)
+    //   - email: string (required, immutable for owner, valid email <= 254 chars)
+    //   - photoUrl: string (optional, empty or http(s) URL <= 1000 chars)
+    //   - role: string (required, immutable for owner, 'user' or 'admin')
+    //   - loginProvider: string (optional, <= 50 chars)
+    //   - googleVerified: bool (optional)
+    //   - passwordSet: bool (optional)
+    //   - biodata: string (optional, <= 1000 chars)
+    //   - updatedAt: timestamp (optional, server timestamp)
+    //
+    // Collection: subjects
+    // Document ID: {subjectId} (normalized subject name)
+    // Fields:
+    //   - name: string (required, 1..120 chars)
+    //   - type: string (required, 'core' or 'admin')
+    //
+    // Collection: subject_requests
+    // Document ID: {reqId} (timestamp string matching field 'id')
+    // Fields:
+    //   - id: string (required, immutable, == reqId, 1..100 chars)
+    //   - subject: string (optional in legacy, required in Flutter, 1..120 chars)
+    //   - name: string (optional legacy alias for subject, 1..120 chars)
+    //   - by: string (required, immutable, valid email <= 254 chars)
+    //   - status: string (required, 'pending' | 'approved' | 'rejected')
+    //   - timestamp: int (required, immutable, > 0)
+    //
+    // Collection: quizzes
+    // Document ID: {subject}
+    // Fields:
+    //   - subject: string (required, 1..120 chars)
+    //   - quizJson: string (required, 2..500000 chars)
+    //   - lastUpdated: int (required, > 0)
+    //
+    // Collection: quiz_attempts
+    // Document ID: {docId} ({safeEmail}_{safeSubject})
+    // Fields:
+    //   - email: string (required, immutable, valid email <= 254 chars)
+    //   - subject: string (required, immutable, 1..120 chars)
+    //   - attempts: int (required, 0..10)
+    //   - totalAttempts: int (required, 0..1000)
+    //   - blocked: bool (required)
+    //   - lastPassed: bool (required)
+    //   - timestamp: int (optional, > 0)
+    //
+    // Collection: user_roles
+    // Document ID: {docId} ({safeEmail}_{safeSubject})
+    // Fields:
+    //   - email: string (required, immutable, valid email <= 254 chars)
+    //   - subject: string (required, immutable, 1..120 chars)
+    //   - role: string (required, 'learner' | 'teacher')
+    //   - score: int (required, 0..10)
+    //   - status: string (optional legacy field, <= 30 chars)
+    //   - timestamp: int (required, > 0)
+    //
+    // Collection: groups
+    // Document ID: {groupId} (e.g. G{timestamp} matching field 'id')
+    // Fields:
+    //   - id: string (required, immutable, == groupId, 1..100 chars)
+    //   - name: string (required, immutable for non-admin, 1..120 chars)
+    //   - subject: string (required, immutable for non-admin, 1..120 chars)
+    //   - createdBy: string (required, immutable, valid email <= 254 chars)
+    //   - members: list<string> (required, max 200 items)
+    //   - teachers: list<string> (required, max 50 items)
+    //   - timestamp: int (required, immutable, > 0)
+    //
+    // Subcollection: groups/{groupId}/messages
+    // Document ID: {messageId}
+    // Fields:
+    //   - groupId: string (required, immutable, == groupId, 1..100 chars)
+    //   - senderEmail: string (required, immutable, valid email <= 254 chars)
+    //   - message: string (required, 0..5000 chars)
+    //   - fileUrl: string | null (optional/nullable, empty or http(s) URL <= 2048 chars)
+    //   - fileType: string | null (optional/nullable, <= 100 chars)
+    //   - fileName: string | null (optional/nullable, <= 255 chars)
+    //   - timestamp: int (required, immutable, > 0)
+    //   - seenBy: list<string> (required, max 200 items)
+    //
+    // Collection: group_join_requests
+    // Document ID: {reqId}
+    // Fields:
+    //   - id: string (required, immutable, == reqId, 1..100 chars)
+    //   - groupId: string (required, immutable, 1..100 chars)
+    //   - groupName: string (required, immutable, 1..120 chars)
+    //   - subject: string (required, immutable, 1..120 chars)
+    //   - requester: string (required, immutable, valid email <= 254 chars)
+    //   - status: string (required, 'pending' | 'accepted' | 'rejected')
+    //   - timestamp: int (required, immutable, > 0)
+    //
+    // Collection: teacher_group_requests
+    // Document ID: {reqId}
+    // Fields:
+    //   - id: string (required, immutable, == reqId, 1..100 chars)
+    //   - groupId: string (required, immutable, 1..100 chars)
+    //   - groupName: string (required, immutable, 1..120 chars)
+    //   - subject: string (required, immutable, 1..120 chars)
+    //   - requester: string (required, immutable, valid email <= 254 chars)
+    //   - teacher: string (required, immutable, valid email <= 254 chars)
+    //   - status: string (required, 'pending' | 'accepted' | 'rejected')
+    //   - timestamp: int (required, immutable, > 0)
+    //
+    // Collection: admin_config
+    // Document ID: {docId} (e.g. 'credentials' with id, password)
+    // NOTE: Legacy AdminLoginScreen / AuthRepository.loginAsAdmin() reads
+    //       admin_config/credentials from the client without Firebase Auth
+    //       custom claims and signs out Firebase Auth on success. Production
+    //       rules lock admin_config writes to false and restrict reads to
+    //       Firebase Auth custom claim (request.auth.token.admin == true).
+    //       Migrate AdminLoginScreen to Firebase Auth + custom claims / Cloud Function.
+    //
+    // Collection: activity_logs
+    // Document ID: {logId}
+    // Fields:
+    //   - email: string (required, valid email <= 254 chars)
+    //   - action: string (required, 1..500 chars)
+    //   - timestamp: int (required, > 0)
+    //
+    // Collection: notes
+    // Document ID: {noteId}
+    // Fields:
+    //   - groupId: string (required, immutable, 1..100 chars)
+    //   - title: string (required, 1..200 chars)
+    //   - url: string (required, http(s) URL <= 2048 chars)
+    //   - type: string (required, 1..50 chars)
+    //   - by: string (required, immutable, valid email <= 254 chars)
+    //   - timestamp: int (required, immutable, > 0)
+    //
+    // Collection: app_data
+    // Document ID: {docId} (e.g. 'subjects')
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+             ('admin' in request.auth.token) &&
+             request.auth.token.admin == true;
+    }
+
+    function hasEmailClaim() {
+      return isAuthenticated() &&
+             ('email' in request.auth.token) &&
+             request.auth.token.email is string &&
+             request.auth.token.email.size() > 0;
+    }
+
+    // Direct equality so Firestore's static query analyzer validates list queries.
+    function hasAuthEmail(email) {
+      return hasEmailClaim() && email is string && email == request.auth.token.email;
+    }
+
+    function docIdStartsWithAuthEmail(docId) {
+      let prefix = request.auth.token.email.lower().replace('\\.', '_') + '_';
+      return hasEmailClaim() &&
+             docId is string &&
+             docId.size() > prefix.size() &&
+             docId.lower()[0:prefix.size()] == prefix;
+    }
+
+    function uidNotModified() {
+      return !('uid' in request.resource.data) ||
+             request.resource.data.uid == resource.data.uid;
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function areImmutableFieldsUnchanged(fields) {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(fields);
+    }
+
+    function validStringLength(field, minLen, maxLen) {
+      return request.resource.data[field] is string &&
+             request.resource.data[field].size() >= minLen &&
+             request.resource.data[field].size() <= maxLen;
+    }
+
+    function isValidOptionalString(field, minLen, maxLen) {
+      return !(field in request.resource.data) ||
+             (request.resource.data[field] is string &&
+              request.resource.data[field].size() >= minLen &&
+              request.resource.data[field].size() <= maxLen);
+    }
+
+    function isValidNullableString(field, minLen, maxLen) {
+      return !(field in request.resource.data) ||
+             request.resource.data[field] == null ||
+             (request.resource.data[field] is string &&
+              request.resource.data[field].size() >= minLen &&
+              request.resource.data[field].size() <= maxLen);
+    }
+
+    function isValidUrl(url) {
+      return url is string &&
+             url.size() <= 2048 &&
+             (url.matches("^https://.*") || url.matches("^http://.*"));
+    }
+
+    function isValidEmail(email) {
+      return email is string &&
+             email.size() <= 254 &&
+             email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidList(listVal, maxSize) {
+      return listVal is list && listVal.size() <= maxSize;
+    }
+
+    function isRecentOrServerTime(timeVal) {
+      return timeVal is timestamp &&
+             timeVal > request.time - duration.value(5, 'm') &&
+             timeVal <= request.time;
+    }
+
+    function isGroupDocParticipant(groupData) {
+      return hasEmailClaim() &&
+             (groupData.createdBy == request.auth.token.email ||
+              request.auth.token.email in groupData.members ||
+              request.auth.token.email in groupData.teachers);
+    }
+
+    function isGroupMemberById(groupId) {
+      return hasEmailClaim() &&
+             groupId is string &&
+             groupId.size() > 0 &&
+             exists(/databases/$(database)/documents/groups/$(groupId)) &&
+             isGroupDocParticipant(get(/databases/$(database)/documents/groups/$(groupId)).data);
+    }
+
+    // ===============================================================
+    // Domain Validators (Used in BOTH create and update)
+    // ===============================================================
+
+    function isValidUser(data, uid) {
+      return hasOnlyAllowedFields([
+               'uid', 'username', 'email', 'photoUrl', 'role',
+               'loginProvider', 'googleVerified', 'passwordSet',
+               'biodata', 'updatedAt'
+             ]) &&
+             hasRequiredFields(['uid', 'username', 'email', 'role']) &&
+             data.uid is string && data.uid == uid &&
+             validStringLength('username', 0, 100) &&
+             isValidEmail(data.email) &&
+             (!('photoUrl' in data) || data.photoUrl == '' || isValidUrl(data.photoUrl)) &&
+             data.role in ['user', 'admin'] &&
+             isValidOptionalString('loginProvider', 0, 50) &&
+             (!('googleVerified' in data) || data.googleVerified is bool) &&
+             (!('passwordSet' in data) || data.passwordSet is bool) &&
+             isValidOptionalString('biodata', 0, 1000) &&
+             (!('updatedAt' in data) || data.updatedAt is timestamp);
+    }
+
+    function isValidSubject(data) {
+      return hasOnlyAllowedFields(['name', 'type']) &&
+             hasRequiredFields(['name', 'type']) &&
+             validStringLength('name', 1, 120) &&
+             data.type in ['core', 'admin'];
+    }
+
+    function isValidSubjectRequest(data, reqId) {
+      return hasOnlyAllowedFields(['id', 'subject', 'name', 'by', 'status', 'timestamp']) &&
+             hasRequiredFields(['id', 'by', 'status', 'timestamp']) &&
+             ('subject' in data || 'name' in data) &&
+             data.id is string && data.id == reqId && validStringLength('id', 1, 100) &&
+             isValidOptionalString('subject', 1, 120) &&
+             isValidOptionalString('name', 1, 120) &&
+             isValidEmail(data.by) &&
+             data.status in ['pending', 'approved', 'rejected'] &&
+             data.timestamp is int && data.timestamp > 0;
+    }
+
+    function isValidQuiz(data, subjectId) {
+      return hasOnlyAllowedFields(['subject', 'quizJson', 'lastUpdated']) &&
+             hasRequiredFields(['subject', 'quizJson', 'lastUpdated']) &&
+             data.subject is string && data.subject == subjectId &&
+             validStringLength('subject', 1, 120) &&
+             validStringLength('quizJson', 2, 500000) &&
+             data.lastUpdated is int && data.lastUpdated > 0;
+    }
+
+    function isValidQuizAttempt(data) {
+      return hasOnlyAllowedFields([
+               'email', 'subject', 'attempts', 'totalAttempts',
+               'blocked', 'lastPassed', 'timestamp'
+             ]) &&
+             hasRequiredFields([
+               'email', 'subject', 'attempts', 'totalAttempts',
+               'blocked', 'lastPassed'
+             ]) &&
+             isValidEmail(data.email) &&
+             validStringLength('subject', 1, 120) &&
+             data.attempts is int && data.attempts >= 0 && data.attempts <= 10 &&
+             data.totalAttempts is int && data.totalAttempts >= 0 && data.totalAttempts <= 1000 &&
+             data.blocked is bool &&
+             data.lastPassed is bool &&
+             (!('timestamp' in data) || (data.timestamp is int && data.timestamp > 0));
+    }
+
+    function isValidUserRole(data) {
+      return hasOnlyAllowedFields(['email', 'subject', 'role', 'score', 'status', 'timestamp']) &&
+             hasRequiredFields(['email', 'subject', 'role', 'score', 'timestamp']) &&
+             isValidEmail(data.email) &&
+             validStringLength('subject', 1, 120) &&
+             data.role in ['learner', 'teacher'] &&
+             data.score is int && data.score >= 0 && data.score <= 10 &&
+             isValidOptionalString('status', 0, 30) &&
+             data.timestamp is int && data.timestamp > 0;
+    }
+
+    function isValidGroup(data, groupId) {
+      return hasOnlyAllowedFields([
+               'id', 'name', 'subject', 'createdBy',
+               'members', 'teachers', 'timestamp'
+             ]) &&
+             hasRequiredFields([
+               'id', 'name', 'subject', 'createdBy',
+               'members', 'teachers', 'timestamp'
+             ]) &&
+             data.id is string && data.id == groupId && validStringLength('id', 1, 100) &&
+             validStringLength('name', 1, 120) &&
+             validStringLength('subject', 1, 120) &&
+             isValidEmail(data.createdBy) &&
+             isValidList(data.members, 200) &&
+             isValidList(data.teachers, 50) &&
+             data.timestamp is int && data.timestamp > 0;
+    }
+
+    function isValidMessage(data, groupId) {
+      return hasOnlyAllowedFields([
+               'groupId', 'senderEmail', 'message',
+               'fileUrl', 'fileType', 'fileName', 'timestamp', 'seenBy'
+             ]) &&
+             hasRequiredFields(['groupId', 'senderEmail', 'message', 'timestamp', 'seenBy']) &&
+             data.groupId is string && data.groupId == groupId &&
+             validStringLength('groupId', 1, 100) &&
+             isValidEmail(data.senderEmail) &&
+             validStringLength('message', 0, 5000) &&
+             (!('fileUrl' in data) || data.fileUrl == null || data.fileUrl == '' || isValidUrl(data.fileUrl)) &&
+             isValidNullableString('fileType', 0, 100) &&
+             isValidNullableString('fileName', 0, 255) &&
+             data.timestamp is int && data.timestamp > 0 &&
+             isValidList(data.seenBy, 200);
+    }
+
+    function isValidGroupJoinRequest(data, reqId) {
+      return hasOnlyAllowedFields([
+               'id', 'groupId', 'groupName', 'subject',
+               'requester', 'status', 'timestamp'
+             ]) &&
+             hasRequiredFields([
+               'id', 'groupId', 'groupName', 'subject',
+               'requester', 'status', 'timestamp'
+             ]) &&
+             data.id is string && data.id == reqId && validStringLength('id', 1, 100) &&
+             validStringLength('groupId', 1, 100) &&
+             validStringLength('groupName', 1, 120) &&
+             validStringLength('subject', 1, 120) &&
+             isValidEmail(data.requester) &&
+             data.status in ['pending', 'accepted', 'rejected'] &&
+             data.timestamp is int && data.timestamp > 0;
+    }
+
+    function isValidTeacherGroupRequest(data, reqId) {
+      return hasOnlyAllowedFields([
+               'id', 'groupId', 'groupName', 'subject',
+               'requester', 'teacher', 'status', 'timestamp'
+             ]) &&
+             hasRequiredFields([
+               'id', 'groupId', 'groupName', 'subject',
+               'requester', 'teacher', 'status', 'timestamp'
+             ]) &&
+             data.id is string && data.id == reqId && validStringLength('id', 1, 100) &&
+             validStringLength('groupId', 1, 100) &&
+             validStringLength('groupName', 1, 120) &&
+             validStringLength('subject', 1, 120) &&
+             isValidEmail(data.requester) &&
+             isValidEmail(data.teacher) &&
+             data.status in ['pending', 'accepted', 'rejected'] &&
+             data.timestamp is int && data.timestamp > 0;
+    }
+
+    function isValidActivityLog(data) {
+      return hasOnlyAllowedFields(['email', 'action', 'timestamp']) &&
+             hasRequiredFields(['email', 'action', 'timestamp']) &&
+             isValidEmail(data.email) &&
+             validStringLength('action', 1, 500) &&
+             data.timestamp is int && data.timestamp > 0;
+    }
+
+    function isValidNote(data) {
+      return hasOnlyAllowedFields(['groupId', 'title', 'url', 'type', 'by', 'timestamp']) &&
+             hasRequiredFields(['groupId', 'title', 'url', 'type', 'by', 'timestamp']) &&
+             validStringLength('groupId', 1, 100) &&
+             validStringLength('title', 1, 200) &&
+             isValidUrl(data.url) &&
+             validStringLength('type', 1, 50) &&
+             isValidEmail(data.by) &&
+             data.timestamp is int && data.timestamp > 0;
+    }
+
+    // ===============================================================
+    // Collection Rules
+    // ===============================================================
+
+    // Users: strict PII separation (owner or admin read only; no self role escalation)
+    match /users/{uid} {
+      allow read: if isOwner(uid) || isAdmin();
+      allow create: if isAuthenticated() &&
+                       isValidUser(request.resource.data, uid) &&
+                       ((isOwner(uid) &&
+                         request.resource.data.role == 'user' &&
+                         hasAuthEmail(request.resource.data.email) &&
+                         (!('updatedAt' in request.resource.data) ||
+                          isRecentOrServerTime(request.resource.data.updatedAt))) ||
+                        isAdmin());
+      allow update: if isAuthenticated() &&
+                       isValidUser(request.resource.data, uid) &&
+                       ((isOwner(uid) &&
+                         uidNotModified() &&
+                         areImmutableFieldsUnchanged(['uid', 'email', 'role']) &&
+                         (!('updatedAt' in request.resource.data.diff(resource.data).affectedKeys()) ||
+                          isRecentOrServerTime(request.resource.data.updatedAt))) ||
+                        isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    // Global subjects catalog
+    match /subjects/{subjectId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAdmin() && isValidSubject(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    // Subject addition requests
+    match /subject_requests/{reqId} {
+      allow read: if isAdmin() ||
+                     (isAuthenticated() && hasAuthEmail(resource.data.by));
+      allow create: if isAuthenticated() &&
+                       isValidSubjectRequest(request.resource.data, reqId) &&
+                       hasAuthEmail(request.resource.data.by) &&
+                       request.resource.data.status == 'pending';
+      allow update: if isAdmin() &&
+                       isValidSubjectRequest(request.resource.data, reqId) &&
+                       areImmutableFieldsUnchanged(['id', 'by', 'timestamp']);
+      allow delete: if isAdmin() ||
+                       (isAuthenticated() &&
+                        hasAuthEmail(resource.data.by) &&
+                        resource.data.status == 'pending');
+    }
+
+    // Teacher qualification quizzes (admin-only writes)
+    match /quizzes/{subject} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAdmin() && isValidQuiz(request.resource.data, subject);
+      allow delete: if isAdmin();
+    }
+
+    // Quiz attempts tracking (users cannot self-unblock once blocked)
+    match /quiz_attempts/{docId} {
+      allow read: if isAdmin() ||
+                     (hasEmailClaim() &&
+                      ((resource == null && docIdStartsWithAuthEmail(docId)) ||
+                       (resource != null && hasAuthEmail(resource.data.email))));
+      allow create: if isAdmin() ||
+                       (isAuthenticated() &&
+                        isValidQuizAttempt(request.resource.data) &&
+                        hasAuthEmail(request.resource.data.email) &&
+                        docIdStartsWithAuthEmail(docId) &&
+                        request.resource.data.attempts <= 1 &&
+                        request.resource.data.totalAttempts == 1);
+      allow update: if (isAdmin() &&
+                        isValidQuizAttempt(request.resource.data) &&
+                        areImmutableFieldsUnchanged(['email', 'subject'])) ||
+                       (isAuthenticated() &&
+                        isValidQuizAttempt(request.resource.data) &&
+                        hasAuthEmail(resource.data.email) &&
+                        areImmutableFieldsUnchanged(['email', 'subject']) &&
+                        !(resource.data.blocked == true && request.resource.data.blocked == false) &&
+                        request.resource.data.totalAttempts == resource.data.totalAttempts + 1);
+      allow delete: if isAdmin();
+    }
+
+    // User subject roles (learner / qualified teacher)
+    // NOTE: Client-side quiz scoring writes role == 'teacher' after updating
+    //       quiz_attempts/{docId} with lastPassed == true. For full server-side
+    //       anti-cheat enforcement, migrate grading & role grant to a Cloud Function.
+    match /user_roles/{docId} {
+      allow read: if isAdmin() ||
+                     (isAuthenticated() &&
+                      (hasAuthEmail(resource.data.email) ||
+                       resource.data.role == 'teacher'));
+      allow create: if (isAdmin() && isValidUserRole(request.resource.data)) ||
+                       (isAuthenticated() &&
+                        isValidUserRole(request.resource.data) &&
+                        hasAuthEmail(request.resource.data.email) &&
+                        docIdStartsWithAuthEmail(docId) &&
+                        ((request.resource.data.role == 'learner' &&
+                          request.resource.data.score == 0) ||
+                         (request.resource.data.role == 'teacher' &&
+                          request.resource.data.score >= 7 &&
+                          exists(/databases/$(database)/documents/quiz_attempts/$(docId)) &&
+                          get(/databases/$(database)/documents/quiz_attempts/$(docId)).data.lastPassed == true &&
+                          get(/databases/$(database)/documents/quiz_attempts/$(docId)).data.blocked == false)));
+      allow update: if (isAdmin() &&
+                        isValidUserRole(request.resource.data) &&
+                        areImmutableFieldsUnchanged(['email', 'subject'])) ||
+                       (isAuthenticated() &&
+                        isValidUserRole(request.resource.data) &&
+                        hasAuthEmail(resource.data.email) &&
+                        areImmutableFieldsUnchanged(['email', 'subject']) &&
+                        ((request.resource.data.role == 'learner' &&
+                          resource.data.role == 'learner' &&
+                          request.resource.data.score == 0) ||
+                         (request.resource.data.role == 'teacher' &&
+                          request.resource.data.score >= 7 &&
+                          exists(/databases/$(database)/documents/quiz_attempts/$(docId)) &&
+                          get(/databases/$(database)/documents/quiz_attempts/$(docId)).data.lastPassed == true &&
+                          get(/databases/$(database)/documents/quiz_attempts/$(docId)).data.blocked == false)));
+      allow delete: if isAdmin();
+    }
+
+    // Study groups & nested chat messages
+    match /groups/{groupId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() &&
+                       isValidGroup(request.resource.data, groupId) &&
+                       hasAuthEmail(request.resource.data.createdBy) &&
+                       request.resource.data.members.size() == 1 &&
+                       hasAuthEmail(request.resource.data.members[0]) &&
+                       request.resource.data.teachers.size() == 0;
+      allow update: if (isAdmin() &&
+                        isValidGroup(request.resource.data, groupId) &&
+                        areImmutableFieldsUnchanged(['id', 'createdBy', 'timestamp'])) ||
+                       (isAuthenticated() &&
+                        isValidGroup(request.resource.data, groupId) &&
+                        areImmutableFieldsUnchanged(['id', 'name', 'subject', 'createdBy', 'timestamp']) &&
+                        (
+                          // Existing participant accepting a join request (adds 1 valid email to members)
+                          (isGroupDocParticipant(resource.data) &&
+                           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members']) &&
+                           request.resource.data.members.hasAll(resource.data.members) &&
+                           (request.resource.data.members.size() == resource.data.members.size() ||
+                            (request.resource.data.members.size() == resource.data.members.size() + 1 &&
+                             isValidEmail(request.resource.data.members[resource.data.members.size()])))) ||
+                          // Existing participant leaving the group (removes only own email)
+                          (isGroupDocParticipant(resource.data) &&
+                           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members', 'teachers']) &&
+                           resource.data.members.hasAll(request.resource.data.members) &&
+                           resource.data.teachers.hasAll(request.resource.data.teachers) &&
+                           request.resource.data.members.size() >= resource.data.members.size() - 1 &&
+                           request.resource.data.teachers.size() >= resource.data.teachers.size() - 1 &&
+                           !(request.auth.token.email in request.resource.data.members) &&
+                           !(request.auth.token.email in request.resource.data.teachers)) ||
+                          // Invited teacher adding only themselves to teachers
+                          (hasEmailClaim() &&
+                           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['teachers']) &&
+                           request.resource.data.teachers.hasAll(resource.data.teachers) &&
+                           (request.resource.data.teachers.size() == resource.data.teachers.size() ||
+                            (request.resource.data.teachers.size() == resource.data.teachers.size() + 1 &&
+                             hasAuthEmail(request.resource.data.teachers[resource.data.teachers.size()]))))
+                        ));
+      allow delete: if isAdmin() ||
+                       (isAuthenticated() && hasAuthEmail(resource.data.createdBy));
+
+      // Group chat messages (restricted to existing group participants; sender-only delete)
+      match /messages/{messageId} {
+        allow read: if isAdmin() || isGroupMemberById(groupId);
+        allow create: if isAuthenticated() &&
+                         isGroupMemberById(groupId) &&
+                         isValidMessage(request.resource.data, groupId) &&
+                         hasAuthEmail(request.resource.data.senderEmail) &&
+                         request.resource.data.seenBy.size() <= 1 &&
+                         (request.resource.data.seenBy.size() == 0 ||
+                          hasAuthEmail(request.resource.data.seenBy[0]));
+        allow update: if (isAdmin() &&
+                          isValidMessage(request.resource.data, groupId) &&
+                          areImmutableFieldsUnchanged(['groupId', 'senderEmail', 'timestamp'])) ||
+                         (isAuthenticated() &&
+                          isGroupMemberById(groupId) &&
+                          isValidMessage(request.resource.data, groupId) &&
+                          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['seenBy']) &&
+                          request.resource.data.seenBy.hasAll(resource.data.seenBy) &&
+                          (request.resource.data.seenBy.size() == resource.data.seenBy.size() ||
+                           (request.resource.data.seenBy.size() == resource.data.seenBy.size() + 1 &&
+                            hasAuthEmail(request.resource.data.seenBy[resource.data.seenBy.size()]))));
+        allow delete: if isAdmin() ||
+                         (isAuthenticated() &&
+                          isGroupMemberById(groupId) &&
+                          hasAuthEmail(resource.data.senderEmail));
+      }
+    }
+
+    // Student group join requests
+    match /group_join_requests/{reqId} {
+      allow read: if isAdmin() ||
+                     (isAuthenticated() &&
+                      (hasAuthEmail(resource.data.requester) ||
+                       isGroupMemberById(resource.data.groupId)));
+      allow create: if isAuthenticated() &&
+                       isValidGroupJoinRequest(request.resource.data, reqId) &&
+                       hasAuthEmail(request.resource.data.requester) &&
+                       request.resource.data.status == 'pending' &&
+                       exists(/databases/$(database)/documents/groups/$(request.resource.data.groupId));
+      allow update: if (isAdmin() &&
+                        isValidGroupJoinRequest(request.resource.data, reqId) &&
+                        areImmutableFieldsUnchanged([
+                          'id', 'groupId', 'groupName', 'subject', 'requester', 'timestamp'
+                        ])) ||
+                       (isAuthenticated() &&
+                        isGroupMemberById(resource.data.groupId) &&
+                        isValidGroupJoinRequest(request.resource.data, reqId) &&
+                        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) &&
+                        resource.data.status == 'pending' &&
+                        request.resource.data.status in ['accepted', 'rejected']);
+      allow delete: if isAdmin() ||
+                       (isAuthenticated() &&
+                        hasAuthEmail(resource.data.requester) &&
+                        resource.data.status == 'pending');
+    }
+
+    // Teacher invitations to join study groups
+    match /teacher_group_requests/{reqId} {
+      allow read: if isAdmin() ||
+                     (isAuthenticated() &&
+                      (hasAuthEmail(resource.data.teacher) ||
+                       hasAuthEmail(resource.data.requester) ||
+                       isGroupMemberById(resource.data.groupId)));
+      allow create: if isAuthenticated() &&
+                       isValidTeacherGroupRequest(request.resource.data, reqId) &&
+                       hasAuthEmail(request.resource.data.requester) &&
+                       isGroupMemberById(request.resource.data.groupId) &&
+                       request.resource.data.status == 'pending';
+      allow update: if (isAdmin() &&
+                        isValidTeacherGroupRequest(request.resource.data, reqId) &&
+                        areImmutableFieldsUnchanged([
+                          'id', 'groupId', 'groupName', 'subject',
+                          'requester', 'teacher', 'timestamp'
+                        ])) ||
+                       (isAuthenticated() &&
+                        hasAuthEmail(resource.data.teacher) &&
+                        isValidTeacherGroupRequest(request.resource.data, reqId) &&
+                        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) &&
+                        resource.data.status == 'pending' &&
+                        request.resource.data.status in ['accepted', 'rejected']);
+      allow delete: if isAdmin() ||
+                       (isAuthenticated() &&
+                        hasAuthEmail(resource.data.requester) &&
+                        resource.data.status == 'pending');
+    }
+
+    // Admin configuration (legacy AdminLoginScreen credential doc)
+    // Client writes are strictly disabled; reads require Firebase Auth admin custom claim.
+    match /admin_config/{docId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // Activity logs (append-only for authenticated users under their own email)
+    match /activity_logs/{logId} {
+      allow read: if isAdmin() ||
+                     (isAuthenticated() && hasAuthEmail(resource.data.email));
+      allow create: if isAuthenticated() &&
+                       isValidActivityLog(request.resource.data) &&
+                       hasAuthEmail(request.resource.data.email);
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+
+    // Group shared notes / links
+    match /notes/{noteId} {
+      allow read: if isAdmin() || isGroupMemberById(resource.data.groupId);
+      allow create: if isAuthenticated() &&
+                       isValidNote(request.resource.data) &&
+                       hasAuthEmail(request.resource.data.by) &&
+                       isGroupMemberById(request.resource.data.groupId);
+      allow update: if (isAdmin() &&
+                        isValidNote(request.resource.data) &&
+                        areImmutableFieldsUnchanged(['groupId', 'by', 'timestamp'])) ||
+                       (isAuthenticated() &&
+                        isValidNote(request.resource.data) &&
+                        hasAuthEmail(resource.data.by) &&
+                        isGroupMemberById(resource.data.groupId) &&
+                        areImmutableFieldsUnchanged(['groupId', 'by', 'timestamp']));
+      allow delete: if isAdmin() ||
+                       (isAuthenticated() &&
+                        isGroupMemberById(resource.data.groupId) &&
+                        hasAuthEmail(resource.data.by));
+    }
+
+    // Legacy app metadata (e.g. app_data/subjects)
+    match /app_data/{docId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAdmin() &&
+                               request.resource.data.keys().size() <= 50;
+      allow delete: if isAdmin();
+    }
+
+    // Default deny fallback
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
